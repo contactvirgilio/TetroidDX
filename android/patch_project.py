@@ -135,7 +135,8 @@ def patch_platform(proj, patch_table):
         text,
         "static void render_frame_internal(const uint32_t* framebuffer, bool count_guest_frame) {\n",
         "static void render_frame_internal(const uint32_t* framebuffer, bool count_guest_frame) {\n"
-        "    tdx_sync_options(g_registered_ctx);\n",
+        "    tdx_sync_options(g_registered_ctx);\n"
+        "    if (count_guest_frame) tdx_save_battery(g_registered_ctx, false);\n",
         1, "options sync")
 
     text = replace_exact(
@@ -203,6 +204,15 @@ def patch_platform(proj, patch_table):
         1, "prefs save")
 
     text = remove_savestates(text)
+    text = replace_exact(
+        text,
+        "        case SDL_APP_WILLENTERBACKGROUND:\n"
+        "            set_app_suspended(true);\n",
+        "        case SDL_APP_TERMINATING:\n"
+        "        case SDL_APP_WILLENTERBACKGROUND:\n"
+        "            tdx_save_battery(g_registered_ctx, true);\n"
+        "            set_app_suspended(true);\n",
+        1, "save on background")
     text = replace_exact(
         text,
         "    g_joypad_buttons = g_manual_joypad_buttons & g_script_joypad_buttons;\n",
@@ -421,8 +431,8 @@ android {
         applicationId "org.tetrisdx.recomp"
         minSdk 26
         targetSdk 34
-        versionCode 9
-        versionName "1.0.8"
+        versionCode 10
+        versionName "1.0.9"
         externalNativeBuild {
             cmake {
                 arguments "-DANDROID_STL=c++_shared", "-DSDL2_SOURCE_DIR=${sdl2SourceDir}"

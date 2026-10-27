@@ -218,6 +218,40 @@ static void tdx_copy_row(uint32_t* dst, const uint32_t* src, int count) {
     memcpy(dst, src, (size_t)count * sizeof(uint32_t));
 }
 
+/* Battery save. Upstream only writes the .sav file when the game shuts down
+ * cleanly, which rarely happens on Android (apps are killed in the
+ * background). Save when the app goes to the background, and every 10 seconds
+ * if the save RAM has changed. */
+static uint8_t* g_tdx_saved_eram = NULL;
+static size_t g_tdx_saved_eram_size = 0;
+
+static void tdx_save_battery(GBContext* ctx, bool force) {
+    static uint32_t frames = 0;
+    if (!force && ++frames < 600) {
+        return;
+    }
+    frames = 0;
+    if (!ctx || !ctx->eram || !ctx->eram_size || ctx->persistence_load_failed) {
+        return;
+    }
+    bool first = false;
+    if (g_tdx_saved_eram_size != ctx->eram_size) {
+        free(g_tdx_saved_eram);
+        g_tdx_saved_eram = (uint8_t*)calloc(1, ctx->eram_size);
+        g_tdx_saved_eram_size = g_tdx_saved_eram ? ctx->eram_size : 0;
+        if (!g_tdx_saved_eram) {
+            return;
+        }
+        first = true;   /* first check this session: always write once */
+    }
+    if (!first && memcmp(g_tdx_saved_eram, ctx->eram, ctx->eram_size) == 0) {
+        return;
+    }
+    if (gb_context_save_ram(ctx)) {
+        memcpy(g_tdx_saved_eram, ctx->eram, ctx->eram_size);
+    }
+}
+
 /* Start+Select (gamepad or touch) opens or closes the menu, as in the DKC builds.
  * buttons is the Game Boy button byte, active low: Select 0x04, Start 0x08. */
 static void tdx_check_menu_combo(uint8_t buttons) {
