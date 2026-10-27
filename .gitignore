@@ -1,0 +1,10 @@
+# Never commit a ROM to this public repository. (In your own private copy you can
+# upload the .gbc through the GitHub website, or delete the *.gbc line below.)
+*.gb
+*.gbc
+*.jks
+*.keystore
+rom/
+work/
+out/
+apk/

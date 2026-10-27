@@ -1,0 +1,203 @@
+name: Build Tetroid DX APK
+
+on:
+  workflow_dispatch:
+
+env:
+  GBRECOMP_REPO: https://github.com/arcanite24/gb-recompiled.git
+  GBRECOMP_COMMIT: 9150f87d82fa98abcb6ea22329170463f9702eb8
+  SDL_TAG: release-2.30.8
+  RGBDS_TAG: v0.9.4
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v5
+
+      - name: Get the ROM
+        env:
+          TDX_ROM_URL: ${{ secrets.TDX_ROM_URL }}
+        run: |
+          # Either a .gbc in the repo root (only in a PRIVATE copy of this repo)
+          # or a direct download link stored in the TDX_ROM_URL secret.
+          mkdir -p rom
+          if [ -n "$TDX_ROM_URL" ]; then
+            curl -sSfL "$TDX_ROM_URL" -o rom/tetrisdx.gbc || { echo "::error::Could not download TDX_ROM_URL"; exit 1; }
+          else
+            ROM=$(ls *.gbc 2>/dev/null | head -1)
+            [ -n "$ROM" ] || { echo "::error::No ROM. Add the .gbc to the root of a private copy, or set the TDX_ROM_URL secret."; exit 1; }
+            cp "$ROM" rom/tetrisdx.gbc
+          fi
+
+      - name: Check the ROM
+        run: |
+          python3 - <<'EOF'
+          import hashlib, os, sys, zlib
+          path = "rom/tetrisdx.gbc"
+          data = open(path, "rb").read()
+          crc = zlib.crc32(data)
+          print(f"CRC32: {crc:08X}")
+          if crc != 0x69989152:
+              sys.exit("This is not Tetris DX (World) (SGB Enhanced).gbc "
+                       "(No-Intro CRC32 69989152). The patches need that exact ROM.")
+          sha = hashlib.sha256(data).hexdigest()
+          with open(os.environ["GITHUB_ENV"], "a") as env:
+              env.write(f"ROM_PATH={path}\nROM_SHA256={sha}\n")
+          EOF
+
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ninja-build bison libpng-dev
+
+      - name: Build RGBDS (assembler for the hard drop patch)
+        run: |
+          git clone -q --depth 1 -b "$RGBDS_TAG" https://github.com/gbdev/rgbds.git rgbds
+          cmake -S rgbds -B rgbds/build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          ninja -C rgbds/build rgbasm rgblink rgbfix
+
+      - name: Apply hard drop, ghost piece, Don't Panic and Skip Celebrations patches
+        run: |
+          python3 - <<'EOF'
+          import os, sys
+          rom = open(os.environ["ROM_PATH"], "rb").read()
+          # Patch code goes at $7F4A-$7FFF in bank 1 (file offset 0x7F4A):
+          # Skip Celebrations hooks at $7F4A, Don't Panic at $7F6C, hard drop at $7F80.
+          area = rom[0x7F4A:0x8000]
+          if len(set(area)) != 1:
+              run = 0
+              while rom[0x7FFF - run] == rom[0x7FFF]:
+                  run += 1
+              sys.exit("Bank 1 $7F4A-$7FFF is not empty filler in this ROM "
+                       f"(free run at the end of bank 1 is {run} bytes).")
+          print("Free space check OK (filler byte 0x%02X)" % area[0])
+          # Skip Celebrations: the code it changes must be exactly what we expect.
+          want = bytes.fromhex("3E10EAA1C018103E11EAA1C0")
+          if rom[0x4568:0x4574] != want:
+              sys.exit("Skip Celebrations: unexpected code at bank 1 $4568")
+          print("Skip Celebrations site check OK")
+          EOF
+          mkdir -p work
+          python3 android/prepare_dontpanic.py "$ROM_PATH" work/dontpanic_orig.inc
+          R=rgbds
+          [ -x "$R/rgbasm" ] || R=rgbds/build/src
+          "$R/rgbasm" -E android/harddrop_toggle.asm -o work/harddrop.o
+          "$R/rgbasm" -E -I work/ android/dontpanic_toggle.asm -o work/dontpanic.o
+          "$R/rgbasm" -E android/skipceleb_toggle.asm -o work/skipceleb.o
+          "$R/rgblink" -O "$ROM_PATH" -o work/patched.gbc work/harddrop.o work/dontpanic.o work/skipceleb.o
+          cmp -l "$ROM_PATH" work/patched.gbc | wc -l
+
+      - name: Build the recompiler
+        run: |
+          git init -q gbr
+          cd gbr
+          git remote add origin "$GBRECOMP_REPO"
+          git fetch -q --depth 1 origin "$GBRECOMP_COMMIT"
+          git checkout -q FETCH_HEAD
+          cmake -G Ninja -B build -DCMAKE_BUILD_TYPE=Release .
+          ninja -C build gbrecomp
+
+      - name: Generate C code from the ROM
+        run: |
+          cp work/patched.gbc work/tetrisdx.gbc
+          gbr/build/bin/gbrecomp work/tetrisdx.gbc \
+            --output out/tetrisdx \
+            --android \
+            --android-package org.tetrisdx.recomp \
+            --android-app-name "Tetroid DX"
+          rm -f work/tetrisdx.gbc
+
+      - name: Patch generated project
+        run: python3 android/patch_project.py out/tetrisdx "$ROM_SHA256" "$ROM_PATH" work/patched.gbc
+
+      - name: Get SDL2
+        run: git clone -q --depth 1 -b "$SDL_TAG" https://github.com/libsdl-org/SDL.git SDL
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Signing key
+        env:
+          KS_B64: ${{ secrets.TDX_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.TDX_STORE_PASS }}
+          KEY_PASS: ${{ secrets.TDX_KEY_PASS }}
+          KEY_ALIAS: ${{ secrets.TDX_KEY_ALIAS }}
+        run: |
+          # Your own key from secrets (so updates install over each other),
+          # otherwise a throwaway key that only works for a single install.
+          if [ -n "$KS_B64" ]; then
+            KS="$RUNNER_TEMP/tdx-release.jks"
+            echo "$KS_B64" | base64 -d > "$KS"
+            echo "TDX_KEYSTORE=$KS" >> "$GITHUB_ENV"
+            echo "TDX_STORE_PASS=$KS_PASS" >> "$GITHUB_ENV"
+            echo "TDX_KEY_PASS=${KEY_PASS:-$KS_PASS}" >> "$GITHUB_ENV"
+            echo "TDX_KEY_ALIAS=${KEY_ALIAS:-tetrisdx}" >> "$GITHUB_ENV"
+            echo "Using the key from secrets"
+          else
+            P=$(openssl rand -hex 16)
+            echo "::add-mask::$P"
+            KS="$RUNNER_TEMP/tdx-throwaway.jks"
+            echo "TDX_KEYSTORE=$KS" >> "$GITHUB_ENV"
+            "$JAVA_HOME/bin/keytool" -genkeypair -keystore "$KS" -storetype PKCS12 -alias tetrisdx \
+              -keyalg RSA -keysize 2048 -validity 10000 -storepass "$P" -keypass "$P" \
+              -dname "CN=Tetroid DX" > /dev/null
+            printf 'TDX_STORE_PASS=%s\nTDX_KEY_PASS=%s\nTDX_KEY_ALIAS=tetrisdx\n' "$P" "$P" >> "$GITHUB_ENV"
+            echo "::warning title=Throwaway signing key::No TDX_KEYSTORE_BASE64 secret, so this APK is signed with a one-off key and future builds will not install over it."
+          fi
+
+      - name: Build APK
+        run: |
+          NDK_DIR="${ANDROID_NDK_HOME:-$ANDROID_NDK_LATEST_HOME}"
+          if [ -n "$NDK_DIR" ]; then
+            export TDX_NDK_VERSION="$(basename "$NDK_DIR")"
+            echo "Using NDK $TDX_NDK_VERSION"
+          fi
+          export SDL2_SOURCE_DIR="$PWD/SDL"
+          curl -sSL https://services.gradle.org/distributions/gradle-8.9-bin.zip -o /tmp/gradle.zip
+          unzip -q /tmp/gradle.zip -d /opt
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
+          set -o pipefail
+          if ! /opt/gradle-8.9/bin/gradle -p out/tetrisdx/android :app:assembleRelease \
+                --no-daemon --console=plain --stacktrace 2>&1 | tee gradle.log; then
+            # Surface the error as an annotation so it can be read without the log.
+            msg=$(grep -E "error:|warning:|undefined symbol|What went wrong|FAILED" gradle.log \
+                  | grep -vE "^\s*at |^C/C\+\+: : &&|clang\+\+ --target" \
+                  | cut -c1-300 | head -30 | sed 's/%/%25/g' | tr '\n' '\001' | sed 's/\x01/%0A/g')
+            echo "::error title=Gradle build failed::${msg}"
+            exit 1
+          fi
+          mkdir -p apk
+          cp out/tetrisdx/android/app/build/outputs/apk/release/app-release.apk apk/TetroidDX.apk
+          ls -l apk
+
+      - name: Check the APK holds no ROM data
+        run: |
+          python3 - <<'EOF'
+          import os, sys, zipfile
+          rom = open(os.environ["ROM_PATH"], "rb").read()
+          probes = []
+          for off in range(0x200, len(rom) - 64, max(1, len(rom) // 40)):
+              chunk = rom[off:off + 64]
+              if len(set(chunk)) >= 8:
+                  probes.append(chunk)
+          print(f"{len(probes)} ROM samples")
+          with zipfile.ZipFile("apk/TetroidDX.apk") as z:
+              for name in z.namelist():
+                  blob = z.read(name)
+                  for chunk in probes:
+                      if chunk in blob:
+                          sys.exit(f"ROM bytes found in {name}; not uploading")
+          print("OK: no ROM data in the APK")
+          EOF
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TetroidDX-apk
+          path: apk/TetroidDX.apk
+          retention-days: 3
