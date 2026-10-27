@@ -181,13 +181,6 @@ static void tdx_draw_menu(void) {
                      ImGuiWindowFlags_NoScrollWithMouse);
     const float fh = ImGui::GetFontSize();
 
-    /* Touch: drag to scroll; a drag never counts as a tap. */
-    if (ImGui::IsMouseClicked(0)) g_tdx_menu_dragged = false;
-    if (ImGui::IsMouseDragging(0, 0.25f * v)) {
-        ImGui::SetScrollY(ImGui::GetScrollY() - io.MouseDelta.y);
-        g_tdx_menu_dragged = true;
-    }
-
     const char* heading = g_tdx_menu_page == TDX_PAGE_CONTROLS ? "Controls"
                         : g_tdx_menu_page == TDX_PAGE_CREDITS  ? "Credits" : "Menu";
     {
@@ -204,6 +197,21 @@ static void tdx_draw_menu(void) {
     const bool right = ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight, true);
     int rows = 0;
 
+    /* The rows live in their own scrolling area that ends above the button
+     * hints, so a row can never slide under them; the title stays fixed. */
+    ImGui::SetCursorPos(ImVec2(0.0f, rowTop0));
+    ImGui::BeginChild("##tdxlist", ImVec2(display.x, display.y - 1.15f * v - rowTop0), false,
+                      ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse |
+                          ImGuiWindowFlags_NoBackground);
+
+    /* Touch: drag to scroll; a drag never counts as a tap. */
+    if (ImGui::IsMouseClicked(0)) g_tdx_menu_dragged = false;
+    if (ImGui::IsMouseDragging(0, 0.25f * v)) {
+        ImGui::SetScrollY(ImGui::GetScrollY() - io.MouseDelta.y);
+        g_tdx_menu_dragged = true;
+    }
+
+
     if (g_tdx_menu_page == TDX_PAGE_MAIN) {
         char labels[9][64];
         snprintf(labels[0], 64, "Hard Drop: %s", g_tdx_harddrop ? "On" : "Off");
@@ -218,7 +226,7 @@ static void tdx_draw_menu(void) {
         rows = 9;
         for (int i = 0; i < rows; ++i) {
             bool focused = false;
-            bool pressed = tdx_menu_row(i, rowTop0 + i * pitch, labels[i], v, fh, display.x,
+            bool pressed = tdx_menu_row(i, i * pitch, labels[i], v, fh, display.x,
                                         focus_first && i == 0, &focused);
             if (focused && left) tdx_change_main(i, -1);
             if (focused && right) pressed = true;
@@ -243,7 +251,7 @@ static void tdx_draw_menu(void) {
                 snprintf(label, sizeof label, "%s: %s", kTdxControlNames[i], b0.c_str());
             }
             bool focused = false;
-            const bool pressed = tdx_menu_row(i, rowTop0 + i * pitch, label, v, fh, display.x,
+            const bool pressed = tdx_menu_row(i, i * pitch, label, v, fh, display.x,
                                               focus_first && i == 0, &focused);
             if (pressed && !g_binding_capture_active) {
                 start_binding_capture(GB_CAPTURE_DEVICE_CONTROLLER, act, 0);
@@ -259,12 +267,12 @@ static void tdx_draw_menu(void) {
                 tdx_pill(msg);
             }
         }
-        if (tdx_menu_row(8, rowTop0 + 8 * pitch, "Reset to defaults", v, fh, display.x, false, NULL)) {
+        if (tdx_menu_row(8, 8 * pitch, "Reset to defaults", v, fh, display.x, false, NULL)) {
             set_default_input_bindings();
             save_runtime_preferences();
             tdx_pill("Controls reset");
         }
-        if (tdx_menu_row(9, rowTop0 + 9 * pitch, "Back", v, fh, display.x, false, NULL)) {
+        if (tdx_menu_row(9, 9 * pitch, "Back", v, fh, display.x, false, NULL)) {
             tdx_menu_back();
         }
     } else {
@@ -286,19 +294,19 @@ static void tdx_draw_menu(void) {
         const ImVec2 origin = ImGui::GetWindowPos();
         for (int k = 0; k < n; ++k) {
             dl->AddText(ImGui::GetFont(), ts,
-                        ImVec2(origin.x + 0.6f * v, origin.y + rowTop0 - ImGui::GetScrollY() + k * lp),
+                        ImVec2(origin.x + 0.6f * v, origin.y - ImGui::GetScrollY() + k * lp),
                         IM_COL32(184, 184, 184, 255), lines[k]);
         }
-        const float backY = rowTop0 + n * lp + 0.2f * v;
+        const float backY = n * lp + 0.2f * v;
         if (tdx_menu_row(0, backY, "Back", v, fh, display.x, focus_first, NULL)) {
             tdx_menu_back();
         }
-        rows = (int)((backY - rowTop0) / pitch) + 1;
+        rows = (int)(backY / pitch) + 1;
     }
 
-    /* Room at the bottom so the last row can scroll clear of the hints. */
-    ImGui::SetCursorPos(ImVec2(0.0f, rowTop0 + rows * pitch));
-    ImGui::Dummy(ImVec2(1.0f, 1.3f * v));
+    ImGui::SetCursorPos(ImVec2(0.0f, rows * pitch));
+    ImGui::Dummy(ImVec2(1.0f, 0.05f * v));
+    ImGui::EndChild();
 
     /* B goes back (or closes) on a gamepad, unless a button is being remapped. */
     if (!g_binding_capture_active && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)) {
