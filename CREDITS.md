@@ -39,5 +39,7 @@ not redistributed here; get it from the link above.
 - [Dear ImGui](https://github.com/ocornut/imgui), MIT License (in-game menu).
 - [RGBDS](https://github.com/gbdev/rgbds), used at build time to assemble the
   patches.
+- BPreplay font (menu) by George Triantafyllakos, SIL Open Font License 1.1;
+  licence text in `licenses/BPreplayBold-OFL.txt`.
 
 These credits also appear in the app, under Credits in the menu.

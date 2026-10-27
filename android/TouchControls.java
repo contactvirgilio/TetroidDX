@@ -8,6 +8,7 @@ import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.view.HapticFeedbackConstants;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
@@ -48,6 +49,15 @@ public class TouchControls extends View {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final float density;
 
+    // Teal confirmation pill (Cannoli style), shown by native code via pill().
+    private static TouchControls instance;
+    private final Paint pillFill = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint pillText = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final RectF pillRect = new RectF();
+    private String pillMessage;
+    private long pillStart;
+    private static final long PILL_MS = 2200, PILL_FADE_MS = 300;
+
     private boolean menuOpen = false;
     private boolean hardDropOn = false;
     private boolean gamepadMode = false;
@@ -86,7 +96,18 @@ public class TouchControls extends View {
         fill.setColor(FILL);
         text.setColor(LABEL);
         text.setTextAlign(Paint.Align.CENTER);
-        text.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        Typeface face;
+        try {
+            face = Typeface.createFromAsset(context.getAssets(), "BPreplayBold.otf");
+        } catch (RuntimeException e) {
+            face = Typeface.create("sans-serif-medium", Typeface.BOLD);
+        }
+        text.setTypeface(face);
+        pillFill.setColor(0xFF00897B);
+        pillText.setColor(0xFFFFFFFF);
+        pillText.setTextAlign(Paint.Align.CENTER);
+        pillText.setTypeface(face);
+        instance = this;
     }
 
     @Override
@@ -191,6 +212,7 @@ public class TouchControls extends View {
 
     @Override
     protected void onDraw(Canvas c) {
+        drawPill(c);
         if (gamepadMode) return;
 
         float corner = 10 * density;
@@ -230,6 +252,40 @@ public class TouchControls extends View {
         if (pressed[START]) c.drawRoundRect(startRect, pr, pr, fill);
         c.drawRoundRect(startRect, pr, pr, stroke);
         drawLabel(c, "START", startRect.centerX(), startRect.centerY());
+    }
+
+    /** Called from native code (JNI) on any thread. */
+    public static void pill(String message) {
+        final TouchControls v = instance;
+        if (v == null || message == null) return;
+        v.post(() -> {
+            v.pillMessage = message;
+            v.pillStart = SystemClock.uptimeMillis();
+            v.invalidate();
+        });
+    }
+
+    private void drawPill(Canvas c) {
+        if (pillMessage == null) return;
+        long t = SystemClock.uptimeMillis() - pillStart;
+        if (t >= PILL_MS) {
+            pillMessage = null;
+            return;
+        }
+        float alpha = t > PILL_MS - PILL_FADE_MS ? (PILL_MS - t) / (float) PILL_FADE_MS : 1f;
+        float v = Math.min(getWidth(), getHeight()) / 7f;
+        pillText.setTextSize(0.30f * v);
+        float tw = pillText.measureText(pillMessage);
+        float h = 0.42f * v, pad = 0.22f * v;
+        float cx = getWidth() / 2f, cy = getHeight() - 0.62f * v;
+        pillRect.set(cx - tw / 2f - pad, cy - h / 2f, cx + tw / 2f + pad, cy + h / 2f);
+        int a = Math.round(alpha * 255);
+        pillFill.setAlpha(a);
+        pillText.setAlpha(a);
+        c.drawRoundRect(pillRect, h / 2f, h / 2f, pillFill);
+        Paint.FontMetrics fm = pillText.getFontMetrics();
+        c.drawText(pillMessage, cx, cy - (fm.ascent + fm.descent) / 2f, pillText);
+        postInvalidateOnAnimation();
     }
 
     private void drawLabel(Canvas c, String s, float x, float y) {

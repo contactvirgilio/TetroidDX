@@ -204,6 +204,7 @@ def patch_platform(proj, patch_table):
         1, "prefs save")
 
     text = remove_savestates(text)
+    text = install_menu(text)
     text = replace_exact(
         text,
         "        case SDL_APP_WILLENTERBACKGROUND:\n"
@@ -249,6 +250,41 @@ def lower_audio_latency(text):
         text, "                        g_audio_latency_ms = (uint32_t)parsed;\n",
         "                        g_audio_latency_ms = (parsed == 80) ? 40u : (uint32_t)parsed;\n",
         1, "audio latency old default")
+    return text
+
+
+def install_menu(text):
+    """Replace the runtime's settings menu with the Tetroid DX menu
+    (android/tdx_menu.inc), which also pauses the game while it is open."""
+    menu = read(os.path.join(HERE, "tdx_menu.inc"))
+    head = "static void render_frame_internal(const uint32_t* framebuffer, bool count_guest_frame) {\n"
+    text = replace_exact(text, head, menu + head, 1, "menu code")
+    text = replace_exact(
+        text, "    if (g_show_menu) {\n",
+        "    if (g_show_menu) {\n        tdx_draw_menu();\n    }\n    if (false) {  /* runtime menu replaced */\n",
+        1, "menu replaces runtime menu")
+    text = replace_exact(
+        text,
+        "            if (!handle_runtime_event(&event, ctx)) {\n"
+        "                return false;\n"
+        "            }\n"
+        "        }\n"
+        "\n"
+        "        while (g_app_suspended) {\n",
+        "            if (!handle_runtime_event(&event, ctx)) {\n"
+        "                return false;\n"
+        "            }\n"
+        "        }\n"
+        "        if (g_show_menu && ImGui::GetCurrentContext() != NULL && !tdx_menu_loop(ctx)) {\n"
+        "            return false;\n"
+        "        }\n"
+        "\n"
+        "        while (g_app_suspended) {\n",
+        1, "menu pauses game")
+    text = replace_exact(
+        text, "    ImGui::StyleColorsDark();\n",
+        "    ImGui::StyleColorsDark();\n    tdx_load_menu_font();\n",
+        1, "menu font")
     return text
 
 
@@ -431,8 +467,8 @@ android {
         applicationId "org.tetrisdx.recomp"
         minSdk 26
         targetSdk 34
-        versionCode 10
-        versionName "1.0.9"
+        versionCode 11
+        versionName "1.1.0"
         externalNativeBuild {
             cmake {
                 arguments "-DANDROID_STL=c++_shared", "-DSDL2_SOURCE_DIR=${sdl2SourceDir}"
@@ -510,6 +546,12 @@ def patch_android(proj, rom_sha256):
         sys.exit("PATCH FAILED [android dir]: generator did not write android/app")
     write(os.path.join(app, "src", "main", "AndroidManifest.xml"), MANIFEST)
     write(os.path.join(app, "build.gradle"), BUILD_GRADLE)
+    font = os.path.join(HERE, "BPreplayBold.otf")
+    if not os.path.isfile(font):
+        sys.exit("PATCH FAILED [font]: android/BPreplayBold.otf missing")
+    assets = os.path.join(app, "src", "main", "assets")
+    os.makedirs(assets, exist_ok=True)
+    shutil.copyfile(font, os.path.join(assets, "BPreplayBold.otf"))
     res = os.path.join(app, "src", "main", "res")
     write(os.path.join(res, "drawable", "ic_launcher_background.xml"), ICON_BACKGROUND)
     write(os.path.join(res, "drawable", "ic_launcher_foreground.xml"), ICON_FOREGROUND)

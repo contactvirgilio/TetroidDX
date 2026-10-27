@@ -28,8 +28,10 @@ exactly like the original):
 **Controls and app:**
 - Touch controls (D-pad, A, B, Select, Start, Menu) that hide when a gamepad is
   used and come back when you touch the screen.
-- In-game menu: Menu button, Start+Select, Android Back, Guide, or L3/R3.
-- Gamepad and keyboard remapping from the menu.
+- In-game menu in the Cannoli style (BPreplay font, teal selection pill),
+  opened with the Menu button, Start+Select, Android Back or Guide. The game
+  pauses while it is open.
+- Controller button remapping from the menu.
 - Low-latency audio tuned for phones.
 - The cartridge's own battery save (high scores) works. Save states are
   deliberately not included.
@@ -72,6 +74,7 @@ Requires Android 8 or newer (arm64).
   recompiling, Android build, a final check that the APK holds no ROM data).
 - `android/patch_project.py`: every change to the generated project, each one
   asserting it matched exactly, so upstream changes fail loudly.
+- `android/tdx_menu.inc`: the in-game menu (Dear ImGui).
 - `android/tdx_platform.inc`: native additions (ROM loader, options byte,
   palettes, scanlines, Start+Select, touch-overlay bridge).
 - `android/*.java`: ROM picker, game activity and touch controls.
