@@ -99,7 +99,7 @@ static bool tdx_change_main(int row, int dir) {
         default: return false;
     }
     save_runtime_preferences();
-    tdx_pill(msg);
+    (void)msg;   /* no pop-up: the menu row already shows the new value */
     return true;
 }
 
@@ -264,7 +264,7 @@ static void tdx_draw_menu(void) {
                                     make_binding(GB_INPUT_BINDING_NONE, 0));
                 char msg[48];
                 snprintf(msg, sizeof msg, "%s cleared", kTdxControlNames[i]);
-                tdx_pill(msg);
+                (void)msg;   /* the row shows it */
             }
         }
         if (tdx_menu_row(8, 8 * pitch, "Reset to defaults", v, fh, display.x, false, NULL)) {
@@ -340,7 +340,7 @@ static bool tdx_menu_loop(GBContext* ctx) {
         while (SDL_PollEvent(&e)) {
             ImGui_ImplSDL2_ProcessEvent(&e);
             if (g_binding_capture_active && handle_binding_capture_event(&e)) {
-                if (!g_binding_capture_active) tdx_pill("Button mapped");
+                /* the mapped button shows on its row; no pop-up */
                 continue;
             }
             switch (e.type) {
