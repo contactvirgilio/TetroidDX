@@ -218,8 +218,8 @@ def patch_platform(proj, patch_table):
         text,
         "    g_joypad_buttons = g_manual_joypad_buttons & g_script_joypad_buttons;\n",
         "    g_joypad_buttons = g_manual_joypad_buttons & g_script_joypad_buttons;\n"
-        "    tdx_check_menu_combo(g_manual_joypad_buttons);\n",
-        1, "start+select menu")
+        "    tdx_check_menu_combo(g_manual_joypad_buttons, g_manual_joypad_dpad);\n",
+        1, "select+down menu")
     text = lower_audio_latency(text)
     # The Palette option only recolours original Game Boy (DMG) games; Tetris DX
     # runs in Game Boy Color mode, where it is greyed out. Remove it.
@@ -467,8 +467,8 @@ android {
         applicationId "org.tetrisdx.recomp"
         minSdk 26
         targetSdk 34
-        versionCode 15
-        versionName "1.1.4"
+        versionCode 16
+        versionName "1.1.5"
         externalNativeBuild {
             cmake {
                 arguments "-DANDROID_STL=c++_shared", "-DSDL2_SOURCE_DIR=${sdl2SourceDir}"

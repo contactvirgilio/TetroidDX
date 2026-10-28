@@ -252,11 +252,12 @@ static void tdx_save_battery(GBContext* ctx, bool force) {
     }
 }
 
-/* Start+Select (gamepad or touch) opens or closes the menu, as in the DKC builds.
- * buttons is the Game Boy button byte, active low: Select 0x04, Start 0x08. */
-static void tdx_check_menu_combo(uint8_t buttons) {
+/* Select + D-pad Down (gamepad or touch) opens or closes the menu. Start+Select is left
+ * to the game, where it quits to the title screen.
+ * buttons is the Game Boy button byte, active low: Select 0x04. dpad is active low: Down 0x08. */
+static void tdx_check_menu_combo(uint8_t buttons, uint8_t dpad) {
     static bool held = false;
-    const bool both = (buttons & 0x0Cu) == 0;
+    const bool both = (buttons & 0x04u) == 0 && (dpad & 0x08u) == 0;
     if (both && !held) {
         g_show_menu = !g_show_menu;
     }

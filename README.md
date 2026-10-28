@@ -29,7 +29,7 @@ exactly like the original):
 - Touch controls (D-pad, A, B, Select, Start, Menu) that hide when a gamepad is
   used and come back when you touch the screen.
 - In-game menu in the Cannoli style (BPreplay font, teal selection pill),
-  opened with the Menu button, Start+Select, Android Back or Guide. The game
+  opened with the Menu button, Select+Down, Android Back or Guide. The game
   pauses while it is open.
 - Controller button remapping from the menu.
 - Low-latency audio tuned for phones.
@@ -76,7 +76,7 @@ Requires Android 8 or newer (arm64).
   asserting it matched exactly, so upstream changes fail loudly.
 - `android/tdx_menu.inc`: the in-game menu (Dear ImGui).
 - `android/tdx_platform.inc`: native additions (ROM loader, options byte,
-  palettes, scanlines, Start+Select, touch-overlay bridge).
+  palettes, scanlines, Select+Down, touch-overlay bridge).
 - `android/*.java`: ROM picker, game activity and touch controls.
 - `android/*.asm`, `android/prepare_dontpanic.py`: the toggle patches.
 
