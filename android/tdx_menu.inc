@@ -278,6 +278,7 @@ static void tdx_draw_menu(void) {
     } else {
         /* Credits: small grey text, then a Back row. */
         static const char* const lines[] = {
+            "Android port built with Claude (Anthropic)",
             "Hard drop & ghost piece: lightbulb-sun (MIT)",
             "  requested by SpongeDan; ghost idea by szechp",
             "Don't Panic: DevEd",

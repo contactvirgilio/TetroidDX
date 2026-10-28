@@ -467,8 +467,8 @@ android {
         applicationId "org.tetrisdx.recomp"
         minSdk 26
         targetSdk 34
-        versionCode 13
-        versionName "1.1.2"
+        versionCode 14
+        versionName "1.1.3"
         externalNativeBuild {
             cmake {
                 arguments "-DANDROID_STL=c++_shared", "-DSDL2_SOURCE_DIR=${sdl2SourceDir}"

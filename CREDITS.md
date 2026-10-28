@@ -5,7 +5,12 @@ supplies their own ROM. Tetris DX is a trademark of its respective owners.
 
 ## Gameplay patches
 
-### Hard drop and ghost piece
+### Android port
+
+The Android app, its menu and its touch controls were built with **Claude**, an AI
+assistant made by Anthropic, working together with the project owner.
+
+## Hard drop and ghost piece
 `android/harddrop_toggle.asm` is adapted from
 [tetrisdx-harddrop](https://github.com/lightbulb-sun/tetrisdx-harddrop) by
 **lightbulb-sun**, MIT License, Copyright (c) 2023 lightbulb-sun. The full
