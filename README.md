@@ -35,6 +35,9 @@ exactly like the original):
 - Low-latency audio tuned for phones.
 - The cartridge's own battery save (high scores) works. Save states are
   deliberately not included.
+- With All files access (asked once, Android 11+), the save and settings are
+  kept in a TetroidDX folder in your phone storage, and a ROM placed there is
+  found automatically.
 
 ## How the toggles work
 

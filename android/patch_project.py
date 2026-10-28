@@ -205,6 +205,16 @@ def patch_platform(proj, patch_table):
 
     text = remove_savestates(text)
     text = install_menu(text)
+    # Settings go next to the save: in the --save-dir folder when one is given
+    # (Tetroid DX passes the TetroidDX folder in phone storage).
+    text = replace_exact(
+        text,
+        "static std::string runtime_preferences_path(void) {\n",
+        "static std::string runtime_preferences_path(void) {\n"
+        "    if (!g_persistence_dir.empty()) {\n"
+        "        return (fs::path(g_persistence_dir) / \"runtime_prefs.ini\").lexically_normal().string();\n"
+        "    }\n",
+        1, "settings next to the save")
     text = replace_exact(
         text,
         "        case SDL_APP_WILLENTERBACKGROUND:\n"
@@ -417,6 +427,9 @@ MANIFEST = """<?xml version="1.0" encoding="utf-8"?>
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
     <uses-feature android:name="android.hardware.gamepad" android:required="false" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Optional "All files access": keeps the save in a TetroidDX folder in the
+         phone's main storage and finds a ROM placed there (as in the DKC ports). -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
 
     <application
         android:allowBackup="false"
@@ -467,8 +480,8 @@ android {
         applicationId "org.tetrisdx.recomp"
         minSdk 26
         targetSdk 34
-        versionCode 16
-        versionName "1.1.5"
+        versionCode 18
+        versionName "1.2.0"
         externalNativeBuild {
             cmake {
                 arguments "-DANDROID_STL=c++_shared", "-DSDL2_SOURCE_DIR=${sdl2SourceDir}"
