@@ -20,7 +20,8 @@ import org.libsdl.app.SDLActivity;
  * Game Boy touch controls drawn over the game. Presses are sent to SDL as
  * key events, which the runtime's default keyboard bindings map to the
  * Game Boy buttons (arrows, Z = A, X = B, Backspace = Select, Enter = Start).
- * The Menu button sends Escape, which opens or closes the runtime menu.
+ * The Menu button sends Escape, which opens the menu. While the menu is
+ * open, every control is hidden and all touches go to the menu.
  */
 public class TouchControls extends View {
 
@@ -79,7 +80,7 @@ public class TouchControls extends View {
             }
             if (open != menuOpen) {
                 menuOpen = open;
-                if (open) releaseGameButtons();
+                if (open) releaseAll();
                 invalidate();
             }
             handler.postDelayed(this, 150);
@@ -121,6 +122,14 @@ public class TouchControls extends View {
         handler.removeCallbacks(poll);
         releaseAll();
         super.onDetachedFromWindow();
+    }
+
+    private static boolean nativeMenuNow() {
+        try {
+            return nativeMenuOpen();
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     public void setGamepadMode(boolean on) {
@@ -214,19 +223,19 @@ public class TouchControls extends View {
     protected void onDraw(Canvas c) {
         drawPill(c);
         if (gamepadMode) return;
+        // The menu is on screen: hide every touch control, Menu button included.
+        boolean open = nativeMenuNow();
+        if (open != menuOpen) {
+            menuOpen = open;
+            if (open) releaseAll();
+        }
+        if (open) return;
 
         float corner = 10 * density;
         text.setTextSize(14 * density);
-        int menuAlpha = menuOpen ? 110 : 255;
-        stroke.setAlpha(menuAlpha);
-        text.setAlpha(menuAlpha);
         if (pressed[MENU]) c.drawRoundRect(menuRect, corner, corner, fill);
         c.drawRoundRect(menuRect, corner, corner, stroke);
         drawLabel(c, "Menu", menuRect.centerX(), menuRect.centerY());
-        stroke.setAlpha(255);
-        text.setAlpha(255);
-
-        if (menuOpen) return;
 
         // D-pad: light only the pressed arm(s).
         float arm = dpadR * 0.33f;
@@ -302,11 +311,11 @@ public class TouchControls extends View {
     }
 
     private void hit(float x, float y, boolean[] out) {
+        if (menuOpen) return;
         if (onMenu(x, y)) {
             out[MENU] = true;
             return;
         }
-        if (menuOpen) return;
 
         float dx = x - dpadX, dy = y - dpadY;
         float dist = (float) Math.hypot(dx, dy);
@@ -357,8 +366,10 @@ public class TouchControls extends View {
             if (gamepadMode) {
                 setGamepadMode(false);
             }
-            // While the runtime menu is open, let touches through to it.
-            if (menuOpen && !onMenu(e.getX(), e.getY())) {
+            // While the menu is open, every touch goes straight to it.
+            if (nativeMenuNow()) {
+                menuOpen = true;
+                releaseAll();
                 return false;
             }
         }
@@ -398,12 +409,6 @@ public class TouchControls extends View {
             }
         }
         if (changed) invalidate();
-    }
-
-    private void releaseGameButtons() {
-        boolean[] now = new boolean[COUNT];
-        now[MENU] = pressed[MENU];
-        apply(now);
     }
 
     public void releaseAll() {

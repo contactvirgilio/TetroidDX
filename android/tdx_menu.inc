@@ -12,7 +12,6 @@ static bool handle_runtime_event(const SDL_Event* event, GBContext* ctx);
 enum { TDX_PAGE_MAIN = 0, TDX_PAGE_CONTROLS = 1, TDX_PAGE_CREDITS = 2 };
 static int g_tdx_menu_page = TDX_PAGE_MAIN;
 static bool g_tdx_menu_focus_first = true;
-static bool g_tdx_menu_dragged = false;
 static ImFont* g_tdx_menu_font = NULL;
 static void* g_tdx_menu_font_data = NULL;
 static const float TDX_FONT_PX = 64.0f;
@@ -103,34 +102,6 @@ static bool tdx_change_main(int row, int dir) {
     return true;
 }
 
-/* One full-width row: invisible tap target, teal pill when selected. */
-static bool tdx_menu_row(int i, float y, const char* label, float v, float fh,
-                         float width, bool focus_this, bool* out_focused) {
-    const float pitch = 0.86f * v, pillH = 0.8f * v;
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    ImGui::SetCursorPos(ImVec2(0.0f, y));
-    const ImVec2 top = ImGui::GetCursorScreenPos();
-    if (focus_this) ImGui::SetKeyboardFocusHere(0);
-    char id[24];
-    snprintf(id, sizeof id, "##tdxrow%d", i);
-    bool pressed = ImGui::InvisibleButton(id, ImVec2(width, pitch));
-    const bool focused = ImGui::IsItemFocused();
-    const bool held = ImGui::IsItemActive() && !g_tdx_menu_dragged;
-    const bool sel = focused || held;
-    const float cy = top.y + pitch * 0.5f;
-    if (sel) {
-        const float tw = ImGui::CalcTextSize(label).x;
-        dl->AddRectFilled(ImVec2(top.x + 0.3f * v, cy - pillH * 0.5f),
-                          ImVec2(top.x + 0.3f * v + tw + 0.6f * v, cy + pillH * 0.5f),
-                          held ? IM_COL32(38, 166, 154, 255) : IM_COL32(0, 137, 123, 255),
-                          pillH * 0.5f);
-    }
-    dl->AddText(ImVec2(top.x + 0.6f * v, cy - fh * 0.5f),
-                sel ? IM_COL32(255, 255, 255, 255) : IM_COL32(184, 184, 184, 255), label);
-    if (out_focused) *out_focused = focused;
-    return pressed && !g_tdx_menu_dragged;
-}
-
 static void tdx_draw_hints(const char* const* letters, const char* const* labels, int n,
                            float v, ImVec2 display) {
     ImDrawList* dl = ImGui::GetForegroundDrawList();
@@ -158,12 +129,35 @@ static void tdx_draw_hints(const char* const* letters, const char* const* labels
     }
 }
 
+/* One menu entry. Info rows (Credits text) are smaller, never selectable. */
+typedef struct {
+    char label[96];
+    bool info;
+} TdxMenuItem;
+
+static float tdx_item_h(const TdxMenuItem* it, float v) {
+    return it->info ? 0.50f * v : 0.86f * v;
+}
+
+/* Matches the DKC1/DKC2 menu (Oct 28 version):
+ * - own selection and scrolling (no ImGui navigation); only whole rows are
+ *   shown, always above the button hints, and the title stays fixed;
+ * - a tap registers only on the label (the pill area), not the whole row;
+ * - dragging anywhere on the list scrolls it, and a drag is never a tap;
+ * - a scroll bar (tap or drag, 1v wide strip on the right) when the list is
+ *   longer than the screen;
+ * - the last row you used stays highlighted;
+ * - hints only while a gamepad is in use; touching hides them. */
 static void tdx_draw_menu(void) {
     ImGuiIO& io = ImGui::GetIO();
     const ImVec2 display = io.DisplaySize;
     const float v = (display.x < display.y ? display.x : display.y) / 7.0f;
     io.FontGlobalScale = (0.46f * v) / (g_tdx_menu_font ? TDX_FONT_PX : 13.0f);
-    const float pitch = 0.86f * v, rowTop0 = 1.35f * v;
+    const float pitch = 0.86f * v, pillH = 0.8f * v, rowTop0 = 1.35f * v;
+    const ImU32 colSel = IM_COL32(0, 137, 123, 255);
+    const ImU32 colHeld = IM_COL32(38, 166, 154, 255);
+    const ImU32 colGrey = IM_COL32(184, 184, 184, 255);
+    const ImU32 colWhite = IM_COL32(255, 255, 255, 255);
 
     ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f), ImGuiCond_Always);
     ImGui::SetNextWindowSize(display, ImGuiCond_Always);
@@ -178,105 +172,80 @@ static void tdx_draw_menu(void) {
                  ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse |
                      ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoTitleBar |
                      ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoMove |
-                     ImGuiWindowFlags_NoScrollWithMouse);
+                     ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoNavInputs |
+                     ImGuiWindowFlags_NoNavFocus);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
     const float fh = ImGui::GetFontSize();
 
-    const char* heading = g_tdx_menu_page == TDX_PAGE_CONTROLS ? "Controls"
-                        : g_tdx_menu_page == TDX_PAGE_CREDITS  ? "Credits" : "Menu";
+    /* Per-page selection and scroll position, kept while the menu is open. */
+    static int s_sel[3] = {0, 0, 0}, s_first[3] = {0, 0, 0};
+    static bool s_pad = false, s_lock = false, s_dragged = false;
+    static int s_down_item = -1, s_down_first = 0, s_last_page = -1;
+    if (ImGui::IsWindowAppearing()) {
+        for (int k = 0; k < 3; ++k) { s_sel[k] = 0; s_first[k] = 0; }
+        s_pad = false;
+        s_lock = true;    /* ignore the buttons that opened the menu until released */
+    }
+    const int page = g_tdx_menu_page;
+    if (page != s_last_page) {
+        if (page != TDX_PAGE_MAIN) { s_sel[page] = 0; s_first[page] = 0; }
+        s_last_page = page;
+        s_lock = true;    /* the press that changed page must not act on the new page */
+    }
+
+    /* Gamepad in use? (hints on). Touching the screen turns them off. */
+    bool anyPad = false;
+    for (int k = (int)ImGuiKey_GamepadStart; k <= (int)ImGuiKey_GamepadRStickDown; ++k)
+        if (ImGui::IsKeyDown((ImGuiKey)k)) anyPad = true;
+    if (anyPad || ImGui::IsKeyPressed(ImGuiKey_DownArrow, false) ||
+        ImGui::IsKeyPressed(ImGuiKey_UpArrow, false)) s_pad = true;
+    if (io.MouseDown[0]) s_pad = false;
+    /* While remapping, and until every button is let go afterwards, the menu
+     * ignores the gamepad, so the button being mapped never also acts here. */
+    if (g_binding_capture_active) s_lock = true;
+    else if (s_lock && !anyPad) s_lock = false;
+    const bool live = !s_lock;
+
     {
+        const char* heading = page == TDX_PAGE_CONTROLS ? "Controls"
+                            : page == TDX_PAGE_CREDITS  ? "Credits" : "Menu";
         const float tsz = 0.75f * v;
         ImGui::SetWindowFontScale(tsz / fh);
-        ImGui::SetCursorPos(ImVec2(0.5f * v, 0.7f * v - tsz * 0.5f));
+        ImGui::SetCursorScreenPos(ImVec2(0.5f * v, 0.7f * v - tsz * 0.5f));
         ImGui::TextColored(ImVec4(192 / 255.0f, 51 / 255.0f, 107 / 255.0f, 1.0f), "%s", heading);
         ImGui::SetWindowFontScale(1.0f);
     }
 
-    const bool focus_first = g_tdx_menu_focus_first || ImGui::IsWindowAppearing();
-    g_tdx_menu_focus_first = false;
-    const bool left = ImGui::IsKeyPressed(ImGuiKey_GamepadDpadLeft, true);
-    const bool right = ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight, true);
-    int rows = 0;
-
-    /* The rows live in their own scrolling area that ends above the button
-     * hints, so a row can never slide under them; the title stays fixed. */
-    ImGui::SetCursorPos(ImVec2(0.0f, rowTop0));
-    ImGui::BeginChild("##tdxlist", ImVec2(display.x, display.y - 1.15f * v - rowTop0), false,
-                      ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse |
-                          ImGuiWindowFlags_NoBackground);
-
-    /* Touch: drag to scroll; a drag never counts as a tap. */
-    if (ImGui::IsMouseClicked(0)) g_tdx_menu_dragged = false;
-    if (ImGui::IsMouseDragging(0, 0.25f * v)) {
-        ImGui::SetScrollY(ImGui::GetScrollY() - io.MouseDelta.y);
-        g_tdx_menu_dragged = true;
-    }
-
-
-    if (g_tdx_menu_page == TDX_PAGE_MAIN) {
-        char labels[9][64];
-        snprintf(labels[0], 64, "Hard Drop: %s", g_tdx_harddrop ? "On" : "Off");
-        snprintf(labels[1], 64, "Ghost Piece: %s", kTdxGhostNames[g_tdx_ghost % 3]);
-        snprintf(labels[2], 64, "Don't Panic: %s", g_tdx_dontpanic ? "On" : "Off");
-        snprintf(labels[3], 64, "Skip Celebrations: %s", g_tdx_skipceleb ? "On" : "Off");
-        snprintf(labels[4], 64, "Palette: %s", kTdxPaletteNames[g_tdx_palette % TDX_PAL_COUNT]);
-        snprintf(labels[5], 64, "Scanlines: %s", g_tdx_scanlines ? "On" : "Off");
-        snprintf(labels[6], 64, "Controls");
-        snprintf(labels[7], 64, "Credits");
-        snprintf(labels[8], 64, "Close");
-        rows = 9;
-        for (int i = 0; i < rows; ++i) {
-            bool focused = false;
-            bool pressed = tdx_menu_row(i, i * pitch, labels[i], v, fh, display.x,
-                                        focus_first && i == 0, &focused);
-            if (focused && left) tdx_change_main(i, -1);
-            if (focused && right) pressed = true;
-            if (!pressed) continue;
-            if (tdx_change_main(i, +1)) continue;
-            if (i == 6) { g_tdx_menu_page = TDX_PAGE_CONTROLS; g_tdx_menu_focus_first = true; }
-            else if (i == 7) { g_tdx_menu_page = TDX_PAGE_CREDITS; g_tdx_menu_focus_first = true; }
-            else if (i == 8) { tdx_close_menu(); }
-        }
-    } else if (g_tdx_menu_page == TDX_PAGE_CONTROLS) {
-        rows = 10;
+    /* ---- build this page's entries ---- */
+    TdxMenuItem items[16];
+    int n = 0;
+    if (page == TDX_PAGE_MAIN) {
+        snprintf(items[n].label, 96, "Hard Drop: %s", g_tdx_harddrop ? "On" : "Off"); items[n++].info = false;
+        snprintf(items[n].label, 96, "Ghost Piece: %s", kTdxGhostNames[g_tdx_ghost % 3]); items[n++].info = false;
+        snprintf(items[n].label, 96, "Don't Panic: %s", g_tdx_dontpanic ? "On" : "Off"); items[n++].info = false;
+        snprintf(items[n].label, 96, "Skip Celebrations: %s", g_tdx_skipceleb ? "On" : "Off"); items[n++].info = false;
+        snprintf(items[n].label, 96, "Palette: %s", kTdxPaletteNames[g_tdx_palette % TDX_PAL_COUNT]); items[n++].info = false;
+        snprintf(items[n].label, 96, "Scanlines: %s", g_tdx_scanlines ? "On" : "Off"); items[n++].info = false;
+        snprintf(items[n].label, 96, "Controls"); items[n++].info = false;
+        snprintf(items[n].label, 96, "Credits"); items[n++].info = false;
+        snprintf(items[n].label, 96, "Close"); items[n++].info = false;
+    } else if (page == TDX_PAGE_CONTROLS) {
         for (int i = 0; i < 8; ++i) {
             const GBInputAction act = kTdxControlActions[i];
-            char label[96];
             if (g_binding_capture_active && g_binding_capture_action == act) {
-                snprintf(label, sizeof label, "%s: press a button...", kTdxControlNames[i]);
+                snprintf(items[n].label, 96, "%s: press a button...", kTdxControlNames[i]);
             } else {
                 /* Show the main assignment only, so rows fit in portrait. */
                 std::string b0 = binding_display_label(g_controller_bindings[act][0]);
                 const size_t cut = b0.find(" / ");
                 if (cut != std::string::npos) b0 = b0.substr(0, cut);
-                snprintf(label, sizeof label, "%s: %s", kTdxControlNames[i], b0.c_str());
+                snprintf(items[n].label, 96, "%s: %s", kTdxControlNames[i], b0.c_str());
             }
-            bool focused = false;
-            const bool pressed = tdx_menu_row(i, i * pitch, label, v, fh, display.x,
-                                              focus_first && i == 0, &focused);
-            if (pressed && !g_binding_capture_active) {
-                start_binding_capture(GB_CAPTURE_DEVICE_CONTROLLER, act, 0);
-            }
-            if (focused && !g_binding_capture_active &&
-                ImGui::IsKeyPressed(ImGuiKey_GamepadFaceLeft, false)) {
-                assign_binding_slot(GB_CAPTURE_DEVICE_CONTROLLER, act, 0,
-                                    make_binding(GB_INPUT_BINDING_NONE, 0));
-                assign_binding_slot(GB_CAPTURE_DEVICE_CONTROLLER, act, 1,
-                                    make_binding(GB_INPUT_BINDING_NONE, 0));
-                char msg[48];
-                snprintf(msg, sizeof msg, "%s cleared", kTdxControlNames[i]);
-                (void)msg;   /* the row shows it */
-            }
+            items[n++].info = false;
         }
-        if (tdx_menu_row(8, 8 * pitch, "Reset to defaults", v, fh, display.x, false, NULL)) {
-            set_default_input_bindings();
-            save_runtime_preferences();
-            tdx_pill("Controls reset");
-        }
-        if (tdx_menu_row(9, 9 * pitch, "Back", v, fh, display.x, false, NULL)) {
-            tdx_menu_back();
-        }
+        snprintf(items[n].label, 96, "Reset to defaults"); items[n++].info = false;
+        snprintf(items[n].label, 96, "Back"); items[n++].info = false;
     } else {
-        /* Credits: small grey text, then a Back row. */
         static const char* const lines[] = {
             "Android port built with Claude (Anthropic)",
             "Hard drop & ghost piece: lightbulb-sun (MIT)",
@@ -289,33 +258,197 @@ static void tdx_draw_menu(void) {
             "Unofficial fan port. Tetris DX is a",
             "trademark of its respective owners.",
         };
-        const int n = (int)(sizeof lines / sizeof lines[0]);
-        const float ts = 0.30f * v, lp = 0.44f * v;
-        ImDrawList* dl = ImGui::GetWindowDrawList();
-        const ImVec2 origin = ImGui::GetWindowPos();
-        for (int k = 0; k < n; ++k) {
-            dl->AddText(ImGui::GetFont(), ts,
-                        ImVec2(origin.x + 0.6f * v, origin.y - ImGui::GetScrollY() + k * lp),
-                        IM_COL32(184, 184, 184, 255), lines[k]);
+        for (size_t k = 0; k < sizeof lines / sizeof lines[0]; ++k) {
+            snprintf(items[n].label, 96, "%s", lines[k]);
+            items[n++].info = true;
         }
-        const float backY = n * lp + 0.2f * v;
-        if (tdx_menu_row(0, backY, "Back", v, fh, display.x, focus_first, NULL)) {
+        snprintf(items[n].label, 96, "Back"); items[n++].info = false;
+    }
+
+    int& sel = s_sel[page];
+    int& first = s_first[page];
+    if (sel < 0 || sel >= n || items[sel].info) {
+        sel = 0;
+        while (sel < n - 1 && items[sel].info) ++sel;
+    }
+
+    /* ---- visible window: whole rows only, from rowTop0 to above the hints ---- */
+    const float areaTop = rowTop0, areaBot = display.y - 1.15f * v, area = areaBot - areaTop;
+    float total = 0.0f;
+    for (int i = 0; i < n; ++i) total += tdx_item_h(&items[i], v);
+    int maxFirst = n - 1;
+    {
+        float h = 0.0f;
+        for (int i = n - 1; i >= 0; --i) {
+            h += tdx_item_h(&items[i], v);
+            if (h > area) break;
+            maxFirst = i;
+        }
+    }
+    const bool scrolls = total > area + 0.5f;
+    if (!scrolls) maxFirst = 0;
+
+    /* ---- gamepad (and arrow keys): move, OK, change values, back ---- */
+    int act = -1, actDir = +1;
+    if (live) {
+        const bool up = ImGui::IsKeyPressed(ImGuiKey_GamepadDpadUp, true) ||
+                        ImGui::IsKeyPressed(ImGuiKey_GamepadLStickUp, true) ||
+                        ImGui::IsKeyPressed(ImGuiKey_UpArrow, true);
+        const bool down = ImGui::IsKeyPressed(ImGuiKey_GamepadDpadDown, true) ||
+                          ImGui::IsKeyPressed(ImGuiKey_GamepadLStickDown, true) ||
+                          ImGui::IsKeyPressed(ImGuiKey_DownArrow, true);
+        if (up) { int k = sel - 1; while (k >= 0 && items[k].info) --k; if (k >= 0) sel = k; }
+        if (down) { int k = sel + 1; while (k < n && items[k].info) ++k; if (k < n) sel = k; }
+        if (up || down) {
+            /* keep the selection on screen */
+            if (sel < first) first = sel;
+            for (;;) {
+                float h = 0.0f;
+                for (int i = first; i <= sel; ++i) h += tdx_item_h(&items[i], v);
+                if (h <= area || first >= sel) break;
+                ++first;
+            }
+            /* on the first selectable row, show any info rows above it too */
+            bool onlyInfoAbove = true;
+            for (int i = 0; i < sel; ++i) if (!items[i].info) onlyInfoAbove = false;
+            if (onlyInfoAbove && up) first = 0;
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceDown, false) ||
+            ImGui::IsKeyPressed(ImGuiKey_Enter, false)) act = sel;
+        const bool valueRow = page == TDX_PAGE_MAIN && sel <= 5;
+        if (valueRow && (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight, true) ||
+                         ImGui::IsKeyPressed(ImGuiKey_RightArrow, true))) { act = sel; actDir = +1; }
+        if (valueRow && (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadLeft, true) ||
+                         ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true))) { act = sel; actDir = -1; }
+    }
+    if (first > maxFirst) first = maxFirst;
+    if (first < 0) first = 0;
+
+    /* ---- scroll bar strip (tap or drag) ---- */
+    const float stripW = 1.0f * v;
+    float before = 0.0f;
+    for (int i = 0; i < first; ++i) before += tdx_item_h(&items[i], v);
+    if (scrolls) {
+        ImGui::SetCursorScreenPos(ImVec2(display.x - stripW, areaTop));
+        ImGui::InvisibleButton("##tdxscroll", ImVec2(stripW, area));
+        if (ImGui::IsItemActive()) {
+            const float thH = area * area / total;
+            float want = (io.MousePos.y - thH * 0.5f - areaTop) / area * total;
+            int f = 0;
+            float acc = 0.0f;
+            while (f < maxFirst && acc + tdx_item_h(&items[f], v) * 0.5f < want) {
+                acc += tdx_item_h(&items[f], v);
+                ++f;
+            }
+            first = f;
+        }
+    }
+
+    /* ---- rows ---- */
+    float y = areaTop;
+    for (int i = first, slot = 0; i < n; ++i, ++slot) {
+        const float h = tdx_item_h(&items[i], v);
+        if (y + h > areaBot + 0.5f) break;
+        const float cy = y + h * 0.5f;
+        if (items[i].info) {
+            const float ts = 0.30f * v;
+            dl->AddText(ImGui::GetFont(), ts, ImVec2(0.6f * v, cy - ts * 0.5f), colGrey, items[i].label);
+            y += h;
+            continue;
+        }
+        /* Only the label (the pill area) takes a tap. Ids are per screen slot,
+         * so a drag that scrolls the list keeps its item. */
+        const float tw = ImGui::CalcTextSize(items[i].label).x;
+        ImGui::SetCursorScreenPos(ImVec2(0.3f * v, y));
+        char id[24];
+        snprintf(id, sizeof id, "##tdxslot%d", slot);
+        const bool clicked = ImGui::InvisibleButton(id, ImVec2(tw + 0.6f * v, h));
+        if (ImGui::IsItemActivated()) { s_down_item = i; s_down_first = first; s_dragged = false; }
+        if (ImGui::IsItemActive() && scrolls && ImGui::IsMouseDragging(0, 0.15f * v)) {
+            s_dragged = true;    /* a drag scrolls the list and is never a tap */
+            const float dy = ImGui::GetMouseDragDelta(0, 0.0f).y;
+            int nf = s_down_first - (int)(dy / pitch + (dy > 0 ? 0.5f : -0.5f));
+            first = nf < 0 ? 0 : (nf > maxFirst ? maxFirst : nf);
+        }
+        if (clicked && !s_dragged && s_down_item >= 0 && !g_binding_capture_active) {
+            sel = s_down_item;
+            act = s_down_item;
+            actDir = +1;
+        }
+        const bool held = ImGui::IsItemActive() && !s_dragged;
+        const bool isSel = held || i == sel;   /* the last row you used stays highlighted */
+        if (isSel) {
+            dl->AddRectFilled(ImVec2(0.3f * v, cy - pillH * 0.5f),
+                              ImVec2(0.3f * v + tw + 0.6f * v, cy + pillH * 0.5f),
+                              held ? colHeld : colSel, pillH * 0.5f);
+        }
+        dl->AddText(ImVec2(0.6f * v, cy - fh * 0.5f), isSel ? colWhite : colGrey, items[i].label);
+        y += h;
+    }
+
+    /* ---- empty space beside the labels: drag scrolls, a tap does nothing.
+     * Submitted after the rows: where two areas overlap, ImGui gives the
+     * touch to the one submitted first, so the labels must come first. ---- */
+    const float listW = display.x - (scrolls ? stripW : 0.0f);
+    ImGui::SetCursorScreenPos(ImVec2(0.0f, areaTop));
+    ImGui::InvisibleButton("##tdxlistbg", ImVec2(listW, area));
+    if (ImGui::IsItemActivated()) { s_down_item = -1; s_down_first = first; s_dragged = false; }
+    if (ImGui::IsItemActive() && scrolls && ImGui::IsMouseDragging(0, 0.15f * v)) {
+        s_dragged = true;
+        const float dy = ImGui::GetMouseDragDelta(0, 0.0f).y;
+        int nf = s_down_first - (int)(dy / pitch + (dy > 0 ? 0.5f : -0.5f));
+        first = nf < 0 ? 0 : (nf > maxFirst ? maxFirst : nf);
+    }
+
+    /* ---- scroll indicator ---- */
+    if (scrolls) {
+        const float tx = display.x - 0.32f * v;
+        dl->AddRectFilled(ImVec2(tx - 0.06f * v, areaTop), ImVec2(tx + 0.06f * v, areaBot),
+                          IM_COL32(255, 255, 255, 55), 0.06f * v);
+        before = 0.0f;
+        for (int i = 0; i < first; ++i) before += tdx_item_h(&items[i], v);
+        const float thH = area * area / total;
+        const float thY = areaTop + area * before / total;
+        dl->AddRectFilled(ImVec2(tx - 0.10f * v, thY), ImVec2(tx + 0.10f * v, thY + thH),
+                          colSel, 0.10f * v);
+    }
+
+    /* ---- clear a mapping with X on the Controls page ---- */
+    if (live && page == TDX_PAGE_CONTROLS && sel < 8 &&
+        ImGui::IsKeyPressed(ImGuiKey_GamepadFaceLeft, false)) {
+        const GBInputAction a = kTdxControlActions[sel];
+        assign_binding_slot(GB_CAPTURE_DEVICE_CONTROLLER, a, 0, make_binding(GB_INPUT_BINDING_NONE, 0));
+        assign_binding_slot(GB_CAPTURE_DEVICE_CONTROLLER, a, 1, make_binding(GB_INPUT_BINDING_NONE, 0));
+    }
+
+    /* ---- act on the chosen row ---- */
+    if (act >= 0 && act < n && !items[act].info) {
+        if (page == TDX_PAGE_MAIN) {
+            if (!tdx_change_main(act, actDir)) {
+                if (act == 6) g_tdx_menu_page = TDX_PAGE_CONTROLS;
+                else if (act == 7) g_tdx_menu_page = TDX_PAGE_CREDITS;
+                else tdx_close_menu();
+            }
+        } else if (page == TDX_PAGE_CONTROLS) {
+            if (act < 8) {
+                start_binding_capture(GB_CAPTURE_DEVICE_CONTROLLER, kTdxControlActions[act], 0);
+            } else if (act == 8) {
+                set_default_input_bindings();
+                save_runtime_preferences();
+                tdx_pill("Controls reset");
+            } else {
+                tdx_menu_back();
+            }
+        } else {
             tdx_menu_back();
         }
-        rows = (int)(backY / pitch) + 1;
     }
 
-    ImGui::SetCursorPos(ImVec2(0.0f, rows * pitch));
-    ImGui::Dummy(ImVec2(1.0f, 0.05f * v));
-    ImGui::EndChild();
+    /* B goes back (or closes) on a gamepad. */
+    if (live && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)) tdx_menu_back();
 
-    /* B goes back (or closes) on a gamepad, unless a button is being remapped. */
-    if (!g_binding_capture_active && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)) {
-        tdx_menu_back();
-    }
-
-    if (io.NavVisible) {
-        if (g_tdx_menu_page == TDX_PAGE_CONTROLS) {
+    if (s_pad) {
+        if (page == TDX_PAGE_CONTROLS) {
             static const char* const L[3] = {"B", "A", "X"};
             static const char* const T[3] = {"BACK", "REMAP", "CLEAR"};
             tdx_draw_hints(L, T, 3, v, display);
@@ -340,6 +473,14 @@ static bool tdx_menu_loop(GBContext* ctx) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             ImGui_ImplSDL2_ProcessEvent(&e);
+            /* Android Back cancels a remap in progress (the capture code
+             * would otherwise swallow it). */
+            if (g_binding_capture_active && e.type == SDL_KEYDOWN && e.key.repeat == 0 &&
+                (e.key.keysym.scancode == SDL_SCANCODE_AC_BACK ||
+                 e.key.keysym.scancode == SDL_SCANCODE_ESCAPE)) {
+                cancel_binding_capture();
+                continue;
+            }
             if (g_binding_capture_active && handle_binding_capture_event(&e)) {
                 /* the mapped button shows on its row; no pop-up */
                 continue;
