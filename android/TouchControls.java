@@ -26,8 +26,7 @@ import org.libsdl.app.SDLActivity;
  * - the centre feedback card (title, value, one bar per choice);
  * - the PATCHES card: the main menu, opened by the Menu quick button, the
  *   Menu shortcut, Select + D-pad Down, Guide or Android Back. The game is
- *   paused while it is open. Its Controls and Credits links open the ImGui
- *   list pages drawn by the game;
+ *   paused while it is open;
  * - the teal confirmation pill.
  */
 public class TouchControls extends View {
@@ -41,7 +40,7 @@ public class TouchControls extends View {
     /** bits: 1 open the PATCHES card, 2 close, 4 Controls page, 8 Credits page. */
     static native void nativeRequest(int bits);
 
-    private static final int REQ_OPEN = 1, REQ_CLOSE = 2, REQ_CONTROLS = 4, REQ_CREDITS = 8;
+    private static final int REQ_OPEN = 1, REQ_CLOSE = 2;
 
     private static final int UP = 0, DOWN = 1, LEFT = 2, RIGHT = 3,
             A = 4, B = 5, SELECT = 6, START = 7, COUNT = 8;
@@ -58,7 +57,6 @@ public class TouchControls extends View {
     private static final int LABEL = 0xFFBDBDBD;
     // A and B in the original Game Boy's wine red.
     private static final int WINE = 0xFF8C2148;
-    private static final int WINE_PRESSED = 0xFFB8406A;
     private static final int WINE_LABEL = 0xFFF2DCE4;
 
     private static final String[] GHOST_NAMES = {"Off", "Light", "Dark"};
@@ -299,15 +297,18 @@ public class TouchControls extends View {
         if (pressed[RIGHT]) c.drawRect(dpadX + arm, dpadY - arm, dpadX + dpadR, dpadY + arm, fill);
         c.drawPath(dpadPath, stroke);
 
-        // A and B: filled in the Game Boy's wine red.
+        // A and B: grey outline like the other buttons, filled in the original
+        // Game Boy's wine red only while pressed.
         text.setTextSize(btnR * 0.75f);
         paint.setStyle(Paint.Style.FILL);
-        paint.setColor(pressed[A] ? WINE_PRESSED : WINE);
-        c.drawCircle(aX, aY, btnR, paint);
-        paint.setColor(pressed[B] ? WINE_PRESSED : WINE);
-        c.drawCircle(bX, bY, btnR, paint);
-        text.setColor(WINE_LABEL);
+        paint.setColor(WINE);
+        if (pressed[A]) c.drawCircle(aX, aY, btnR, paint);
+        if (pressed[B]) c.drawCircle(bX, bY, btnR, paint);
+        c.drawCircle(aX, aY, btnR, stroke);
+        c.drawCircle(bX, bY, btnR, stroke);
+        text.setColor(pressed[A] ? WINE_LABEL : LABEL);
         drawLabel(c, "A", aX, aY);
+        text.setColor(pressed[B] ? WINE_LABEL : LABEL);
         drawLabel(c, "B", bX, bY);
         text.setColor(LABEL);
 
@@ -603,8 +604,8 @@ public class TouchControls extends View {
 
     private static final String[] PATCH_NAMES = {"Hard Drop", "Ghost Piece", "Don't Panic", "Skip Celebrations"};
     private final RectF patchesCard = new RectF();
-    private final RectF[] tileRect = {new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF()};
-    private int sel = 0;              // 0-3 tiles, 4 Controls, 5 Credits
+    private final RectF[] tileRect = {new RectF(), new RectF(), new RectF(), new RectF()};
+    private int sel = 0;              // tile 0-3
     private boolean navActive = false; // gamepad in use on the card: show the hint line
     private int touchItem = -1;
     private boolean touchOutside = false;
@@ -632,8 +633,6 @@ public class TouchControls extends View {
             case 1: nset(1, (nget(1) + 1) % 3); break;
             case 2: nset(2, nget(2) != 0 ? 0 : 1); break;
             case 3: nset(3, nget(3) != 0 ? 0 : 1); break;
-            case 4: nreq(REQ_CONTROLS); break;
-            case 5: nreq(REQ_CREDITS); break;
             default: return;
         }
         buzz();
@@ -696,12 +695,12 @@ public class TouchControls extends View {
 
     private void drawPatches(Canvas c) {
         float d = density, W = getWidth(), H = getHeight();
-        float pad = 22f * d, gap = 14f * d, titleH = 26f * d, linkH = 48f * d, hintH = 30f * d;
+        float pad = 22f * d, gap = 14f * d, titleH = 26f * d, hintH = 30f * d;
         float cw = Math.min(W * 0.94f, 600f * d);
         float tw = (cw - 2f * pad - gap) / 2f, th = tw * 0.62f;
-        float ch = pad + titleH + 2f * th + gap + linkH + hintH;
+        float ch = pad + titleH + 2f * th + gap + hintH;
         if (ch > H * 0.94f) {   // short landscape screens: shrink the tiles to fit
-            th = (H * 0.94f - pad - titleH - gap - linkH - hintH) / 2f;
+            th = (H * 0.94f - pad - titleH - gap - hintH) / 2f;
             ch = H * 0.94f;
         }
         float x0 = (W - cw) / 2f, y0 = (H - ch) / 2f;
@@ -739,21 +738,6 @@ public class TouchControls extends View {
                     on ? YELLOW : 0xFF9AA4AD, 1f, Typeface.DEFAULT);
         }
 
-        float ly = y0 + pad + titleH + 2f * th + gap;
-        String[] links = {"Controls  ›", "Credits  ›"};
-        for (int j = 0; j < 2; j++) {
-            float lx = x0 + pad + j * (tw + gap);
-            tileRect[4 + j].set(lx, ly, lx + tw, ly + linkH);
-            boolean selShown = sel == 4 + j;
-            if (selShown && (navActive || touchItem == 4 + j)) {
-                strokeC(YELLOW, 1f, 2f * d);
-                c.drawRoundRect(lx + tw * 0.15f, ly + linkH * 0.15f, lx + tw * 0.85f, ly + linkH * 0.85f,
-                        linkH * 0.35f, linkH * 0.35f, paint);
-            }
-            textC(c, links[j], lx + tw / 2f, ly + linkH * 0.5f, 14f * d,
-                    selShown && navActive ? 0xFFFFFFFF : 0xFFC8CDD2, 1f, semi);
-        }
-
         if (navActive) {
             paint.setStyle(Paint.Style.FILL);
             paint.setTypeface(Typeface.DEFAULT);
@@ -773,7 +757,7 @@ public class TouchControls extends View {
             navActive = false;
             touchOutside = !patchesCard.contains(x, y);
             touchItem = -1;
-            for (int i = 0; i < 6; i++) if (tileRect[i].contains(x, y)) touchItem = i;
+            for (int i = 0; i < 4; i++) if (tileRect[i].contains(x, y)) touchItem = i;
             if (touchItem >= 0) sel = touchItem;
             invalidate();
         } else if (a == MotionEvent.ACTION_UP) {
@@ -803,10 +787,10 @@ public class TouchControls extends View {
         int code = e.getKeyCode();
         if (e.getAction() != KeyEvent.ACTION_DOWN) return false;
         boolean first = e.getRepeatCount() == 0;
-        int row = sel < 4 ? sel / 2 : 2, col = sel < 4 ? sel % 2 : sel - 4;
+        int row = sel / 2, col = sel % 2;
         switch (code) {
-            case KeyEvent.KEYCODE_DPAD_UP: row = Math.max(0, row - 1); break;
-            case KeyEvent.KEYCODE_DPAD_DOWN: row = Math.min(2, row + 1); break;
+            case KeyEvent.KEYCODE_DPAD_UP: row = 0; break;
+            case KeyEvent.KEYCODE_DPAD_DOWN: row = 1; break;
             case KeyEvent.KEYCODE_DPAD_LEFT: col = 0; break;
             case KeyEvent.KEYCODE_DPAD_RIGHT: col = 1; break;
             case KeyEvent.KEYCODE_BUTTON_A:
@@ -826,7 +810,7 @@ public class TouchControls extends View {
                 // any other gamepad press is kept from the paused game
                 return KeyEvent.isGamepadButton(code);
         }
-        sel = row < 2 ? row * 2 + col : 4 + col;
+        sel = row * 2 + col;
         navActive = true;
         invalidate();
         return true;
