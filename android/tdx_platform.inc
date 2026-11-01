@@ -7,6 +7,12 @@
 /* Display options. Scanlines saved as display.scanlines; the palette
  * (including colour correction) is below, saved as display.palette. */
 static bool g_tdx_scanlines = false;
+
+/* Gamepad shortcuts (defined in tdx_menu.inc); declared here because the
+ * runtime's settings load/save, earlier in the file, store them. */
+enum { TDX_SC_COUNT = 4 };
+static void tdx_sc_parse(int i, const char* value);
+static std::string tdx_sc_value(int i);
 static uint32_t* g_tdx_cc_lut = NULL;
 
 /* Hard drop and ghost piece (see android/harddrop_toggle.asm, based on

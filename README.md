@@ -28,10 +28,15 @@ exactly like the original):
 **Controls and app:**
 - Touch controls (D-pad, A, B, Select, Start, Menu) that hide when a gamepad is
   used and come back when you touch the screen.
-- In-game menu in the Cannoli style (BPreplay font, teal selection pill),
-  opened with the Menu button, Select+Down, Android Back or Guide. The game
-  pauses while it is open.
-- Controller button remapping from the menu.
+- PATCHES card (the main menu, in the style of the DKC ports): tiles to switch
+  Hard Drop, Ghost Piece, Don't Panic and Skip Celebrations, plus Controls and
+  Credits. Opened with the Menu quick button, Select+Down, Android Back, Guide
+  or a gamepad shortcut. The game pauses while it is open.
+- Quick buttons top right (Mute, Palette, Scanlines, Menu) that fade after 15 s.
+- Gamepad shortcuts (buttons held together): Menu, Toggle Hard Drop, Cycle
+  Ghost Piece, Cycle Palette; set them on the Controls page.
+- Touch A and B in the original Game Boy's wine red.
+- Controller button remapping from the Controls page.
 - Low-latency audio tuned for phones.
 - The cartridge's own battery save (high scores) works. Save states are
   deliberately not included.

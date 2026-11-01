@@ -141,6 +141,8 @@ public class GameActivity extends SDLActivity {
                 && event.getKeyCode() != KeyEvent.KEYCODE_BACK) {
             touch.setGamepadMode(true);
         }
+        // The PATCHES card takes the D-pad, A, B, Guide and Back while it is open.
+        if (touch != null && touch.patchesKey(event)) return true;
         return super.dispatchKeyEvent(event);
     }
 

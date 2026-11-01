@@ -170,6 +170,10 @@ def patch_platform(proj, patch_table):
         "                    g_tdx_harddrop = (strcmp(value, \"0\") != 0);\n"
         "                    continue;\n"
         "                }\n"
+        "                if (strncmp(key, \"tdx.sc\", 6) == 0 && key[6] >= '0' && key[6] < '0' + TDX_SC_COUNT && !key[7]) {\n"
+        "                    tdx_sc_parse(key[6] - '0', value);\n"
+        "                    continue;\n"
+        "                }\n"
         "                if (strcmp(key, \"display.pal\") == 0) {\n"
         "                    long pv = strtol(value, NULL, 10);\n"
         "                    g_tdx_palette = (pv >= 0 && pv < TDX_PAL_COUNT) ? (int)pv : TDX_PAL_GBC_LCD;\n"
@@ -200,11 +204,32 @@ def patch_platform(proj, patch_table):
         "    fprintf(file, \"tdx.ghost=%d\\n\", g_tdx_ghost);\n"
         "    fprintf(file, \"tdx.dontpanic=%d\\n\", g_tdx_dontpanic ? 1 : 0);\n"
         "    fprintf(file, \"tdx.skipceleb=%d\\n\", g_tdx_skipceleb ? 1 : 0);\n"
-        "    fprintf(file, \"display.pal=%d\\n\", g_tdx_palette);\n",
+        "    fprintf(file, \"display.pal=%d\\n\", g_tdx_palette);\n"
+        "    for (int sc = 0; sc < TDX_SC_COUNT; ++sc) fprintf(file, \"tdx.sc%d=%s\\n\", sc, tdx_sc_value(sc).c_str());\n",
         1, "prefs save")
 
     text = remove_savestates(text)
     text = install_menu(text)
+    # Java PATCHES card / quick buttons ask for menu changes; apply them on the
+    # game thread at the start of every frame.
+    text = replace_exact(
+        text,
+        "    tdx_sync_options(g_registered_ctx);\n",
+        "    tdx_sync_options(g_registered_ctx);\n    tdx_process_requests();\n",
+        1, "menu requests")
+    # Gamepad shortcuts see every controller button before the game does.
+    text = replace_exact(
+        text,
+        "    if (handle_binding_capture_event(event)) {\n"
+        "        return true;\n"
+        "    }\n",
+        "    if (handle_binding_capture_event(event)) {\n"
+        "        return true;\n"
+        "    }\n"
+        "    if (tdx_shortcut_event(event, !g_show_menu)) {\n"
+        "        return true;\n"
+        "    }\n",
+        1, "gamepad shortcuts")
     # Settings go next to the save: in the --save-dir folder when one is given
     # (Tetroid DX passes the TetroidDX folder in phone storage).
     text = replace_exact(
@@ -480,8 +505,8 @@ android {
         applicationId "org.tetrisdx.recomp"
         minSdk 26
         targetSdk 34
-        versionCode 18
-        versionName "1.2.0"
+        versionCode 19
+        versionName "1.3.0"
         externalNativeBuild {
             cmake {
                 arguments "-DANDROID_STL=c++_shared", "-DSDL2_SOURCE_DIR=${sdl2SourceDir}"

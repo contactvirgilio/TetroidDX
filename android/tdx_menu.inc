@@ -70,6 +70,208 @@ static void tdx_menu_back(void) {
     }
 }
 
+/* ---- PATCHES card, quick buttons and gamepad shortcuts (Nov 2026) ----
+ * The main menu is now the Java PATCHES card drawn by the touch overlay (the
+ * same style as the DKC STATES card). Java reads and changes the options
+ * through nativeGet/nativeSet and asks for the menu to open, close or show a
+ * list page through nativeRequest; the game thread applies those requests at
+ * the start of each frame. Controls and Credits stay as ImGui list pages. */
+static std::atomic<int> g_tdx_req{0};
+enum { TDX_REQ_OPEN = 1, TDX_REQ_CLOSE = 2, TDX_REQ_CONTROLS = 4, TDX_REQ_CREDITS = 8, TDX_REQ_SAVE = 16 };
+
+static void tdx_process_requests(void) {
+    const int r = g_tdx_req.exchange(0);
+    if (!r) return;
+    if (r & TDX_REQ_SAVE) save_runtime_preferences();
+    if (r & TDX_REQ_CLOSE) tdx_close_menu();
+    if (r & TDX_REQ_OPEN) { g_tdx_menu_page = TDX_PAGE_MAIN; g_show_menu = true; }
+    if (r & TDX_REQ_CONTROLS) { g_tdx_menu_page = TDX_PAGE_CONTROLS; g_show_menu = true; }
+    if (r & TDX_REQ_CREDITS) { g_tdx_menu_page = TDX_PAGE_CREDITS; g_show_menu = true; }
+}
+
+/* Centre feedback card (title, value, one bar per choice), drawn by the overlay. */
+static void tdx_card(const char* title, const char* value, int index, int count) {
+#if defined(__ANDROID__)
+    JNIEnv* env = (JNIEnv*)SDL_AndroidGetJNIEnv();
+    if (!env) return;
+    jclass cls = env->FindClass("org/tetrisdx/recomp/TouchControls");
+    if (!cls) { env->ExceptionClear(); return; }
+    jmethodID m = env->GetStaticMethodID(cls, "card", "(Ljava/lang/String;Ljava/lang/String;II)V");
+    if (!m) { env->ExceptionClear(); env->DeleteLocalRef(cls); return; }
+    jstring t = env->NewStringUTF(title);
+    jstring v = env->NewStringUTF(value);
+    env->CallStaticVoidMethod(cls, m, t, v, (jint)index, (jint)count);
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    env->DeleteLocalRef(t);
+    env->DeleteLocalRef(v);
+    env->DeleteLocalRef(cls);
+#else
+    fprintf(stderr, "[TDX] %s: %s (%d/%d)\n", title, value, index + 1, count);
+#endif
+}
+
+/* Lemuroid-style gamepad shortcuts: buttons held together. Stored as
+ * tdx.sc0..tdx.sc3 = SDL controller button numbers, comma separated.
+ * 0 Menu (empty = built-in Guide / L3 / Select+Down), 1 Toggle Hard Drop,
+ * 2 Cycle Ghost Piece, 3 Cycle Palette. */
+/* TDX_SC_COUNT and the helpers' declarations are in tdx_platform.inc. */
+static int g_tdx_sc[TDX_SC_COUNT][3];
+static int g_tdx_sc_n[TDX_SC_COUNT] = {0, 0, 0, 0};
+static int g_tdx_sc_cap = -1;                 /* shortcut being recorded, or -1 */
+static int g_tdx_cap_set[3];
+static int g_tdx_cap_n = 0;
+static bool g_tdx_pad_held[SDL_CONTROLLER_BUTTON_MAX];
+static int g_tdx_sc_swallow = -1;             /* button whose release the game must not see */
+static const char* const kTdxShortcutNames[TDX_SC_COUNT] = {
+    "Menu shortcut", "Hard Drop shortcut", "Ghost shortcut", "Palette shortcut"};
+
+static void tdx_sc_parse(int i, const char* value) {
+    g_tdx_sc_n[i] = 0;
+    const char* p = value;
+    while (p && *p && g_tdx_sc_n[i] < 3) {
+        char* end = NULL;
+        long b = strtol(p, &end, 10);
+        if (end == p) break;
+        if (b >= 0 && b < SDL_CONTROLLER_BUTTON_MAX) g_tdx_sc[i][g_tdx_sc_n[i]++] = (int)b;
+        p = (*end == ',') ? end + 1 : end;
+    }
+}
+
+static std::string tdx_sc_value(int i) {
+    std::string out;
+    for (int k = 0; k < g_tdx_sc_n[i]; ++k) {
+        if (k) out += ",";
+        out += std::to_string(g_tdx_sc[i][k]);
+    }
+    return out;
+}
+
+static std::string tdx_sc_label(int i) {
+    if (g_tdx_sc_cap == i) return "press buttons...";
+    if (g_tdx_sc_n[i] == 0) return i == 0 ? "Guide / L3" : "None";
+    std::string out;
+    for (int k = 0; k < g_tdx_sc_n[i]; ++k) {
+        if (k) out += " + ";
+        out += binding_display_label(make_binding(GB_INPUT_BINDING_CONTROLLER_BUTTON, g_tdx_sc[i][k]));
+    }
+    return out;
+}
+
+static void tdx_fire_shortcut(int i) {
+    static const char* const ghost[3] = {"Off", "Light", "Dark"};
+    static const char* const pal[TDX_PAL_COUNT] = {"Original", "GBC LCD", "Pastel", "Swamp", "Sunset"};
+    switch (i) {
+        case 0:
+            g_tdx_menu_page = TDX_PAGE_MAIN;
+            g_show_menu = true;
+            return;
+        case 1:
+            g_tdx_harddrop = !g_tdx_harddrop;
+            tdx_card("HARD DROP", g_tdx_harddrop ? "On" : "Off", g_tdx_harddrop ? 1 : 0, 2);
+            break;
+        case 2:
+            g_tdx_ghost = (g_tdx_ghost + 1) % 3;
+            tdx_card("GHOST PIECE", ghost[g_tdx_ghost], g_tdx_ghost, 3);
+            break;
+        default:
+            g_tdx_palette = (g_tdx_palette + 1) % TDX_PAL_COUNT;
+            tdx_card("PALETTE", pal[g_tdx_palette], g_tdx_palette, TDX_PAL_COUNT);
+            break;
+    }
+    save_runtime_preferences();
+}
+
+/* Sees every controller button event. Returns true if the game must not get it.
+ * allow_fire is false inside the menu (only recording and held tracking there). */
+static bool tdx_shortcut_event(const SDL_Event* e, bool allow_fire) {
+    if (e->type != SDL_CONTROLLERBUTTONDOWN && e->type != SDL_CONTROLLERBUTTONUP) return false;
+    const int b = e->cbutton.button;
+    if (b < 0 || b >= SDL_CONTROLLER_BUTTON_MAX) return false;
+    const bool down = e->type == SDL_CONTROLLERBUTTONDOWN;
+    g_tdx_pad_held[b] = down;
+    if (g_tdx_sc_cap >= 0) {   /* recording: collect buttons until all are let go */
+        if (down && g_tdx_cap_n < 3) {
+            bool dup = false;
+            for (int k = 0; k < g_tdx_cap_n; ++k) if (g_tdx_cap_set[k] == b) dup = true;
+            if (!dup) g_tdx_cap_set[g_tdx_cap_n++] = b;
+        }
+        if (!down && g_tdx_cap_n > 0) {
+            bool any = false;
+            for (int k = 0; k < SDL_CONTROLLER_BUTTON_MAX; ++k) if (g_tdx_pad_held[k]) any = true;
+            if (!any) {
+                for (int k = 0; k < g_tdx_cap_n; ++k) g_tdx_sc[g_tdx_sc_cap][k] = g_tdx_cap_set[k];
+                g_tdx_sc_n[g_tdx_sc_cap] = g_tdx_cap_n;
+                g_tdx_sc_cap = -1;
+                g_tdx_cap_n = 0;
+                save_runtime_preferences();
+            }
+        }
+        return true;
+    }
+    if (!down) {
+        if (g_tdx_sc_swallow == b) { g_tdx_sc_swallow = -1; return true; }
+        return false;
+    }
+    if (!allow_fire) return false;
+    for (int i = 0; i < TDX_SC_COUNT; ++i) {
+        const int n = g_tdx_sc_n[i];
+        if (n == 0) continue;
+        bool has = false, all = true;
+        for (int k = 0; k < n; ++k) {
+            if (g_tdx_sc[i][k] == b) has = true;
+            if (!g_tdx_pad_held[g_tdx_sc[i][k]]) all = false;
+        }
+        if (has && all) {
+            g_tdx_sc_swallow = b;   /* the press that completed the combo */
+            tdx_fire_shortcut(i);
+            return true;
+        }
+    }
+    return false;
+}
+
+#if defined(__ANDROID__)
+/* Java side of the options. ids: 0 Hard Drop, 1 Ghost, 2 Don't Panic,
+ * 3 Skip Celebrations, 4 Palette, 5 Scanlines, 6 Mute, 7 menu page (-1 closed). */
+extern "C" JNIEXPORT jint JNICALL
+Java_org_tetrisdx_recomp_TouchControls_nativeGet(JNIEnv* env, jclass cls, jint id) {
+    (void)env; (void)cls;
+    switch (id) {
+        case 0: return g_tdx_harddrop ? 1 : 0;
+        case 1: return g_tdx_ghost;
+        case 2: return g_tdx_dontpanic ? 1 : 0;
+        case 3: return g_tdx_skipceleb ? 1 : 0;
+        case 4: return g_tdx_palette;
+        case 5: return g_tdx_scanlines ? 1 : 0;
+        case 6: return g_audio_muted.load(std::memory_order_relaxed) ? 1 : 0;
+        case 7: return g_show_menu ? g_tdx_menu_page : -1;
+        default: return 0;
+    }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_org_tetrisdx_recomp_TouchControls_nativeSet(JNIEnv* env, jclass cls, jint id, jint v) {
+    (void)env; (void)cls;
+    switch (id) {
+        case 0: g_tdx_harddrop = v != 0; break;
+        case 1: g_tdx_ghost = (v >= 0 && v <= 2) ? (int)v : 0; break;
+        case 2: g_tdx_dontpanic = v != 0; break;
+        case 3: g_tdx_skipceleb = v != 0; break;
+        case 4: g_tdx_palette = (v >= 0 && v < TDX_PAL_COUNT) ? (int)v : TDX_PAL_GBC_LCD; break;
+        case 5: g_tdx_scanlines = v != 0; break;
+        case 6: g_audio_muted.store(v != 0, std::memory_order_relaxed); break;
+        default: return;
+    }
+    g_tdx_req.fetch_or(TDX_REQ_SAVE);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_org_tetrisdx_recomp_TouchControls_nativeRequest(JNIEnv* env, jclass cls, jint bits) {
+    (void)env; (void)cls;
+    g_tdx_req.fetch_or((int)bits);
+}
+#endif
+
 static const char* const kTdxGhostNames[3] = {"Off", "Light", "Dark"};
 static const char* const kTdxPaletteNames[TDX_PAL_COUNT] = {
     "Original", "GBC LCD", "Pastel", "Swamp", "Sunset"};
@@ -149,6 +351,11 @@ static float tdx_item_h(const TdxMenuItem* it, float v) {
  * - the last row you used stays highlighted;
  * - hints only while a gamepad is in use; touching hides them. */
 static void tdx_draw_menu(void) {
+#if defined(__ANDROID__)
+    /* On Android the main page is the Java PATCHES card drawn by the touch
+     * overlay; ImGui only draws the Controls and Credits list pages. */
+    if (g_tdx_menu_page == TDX_PAGE_MAIN) return;
+#endif
     ImGuiIO& io = ImGui::GetIO();
     const ImVec2 display = io.DisplaySize;
     const float v = (display.x < display.y ? display.x : display.y) / 7.0f;
@@ -202,7 +409,7 @@ static void tdx_draw_menu(void) {
     if (io.MouseDown[0]) s_pad = false;
     /* While remapping, and until every button is let go afterwards, the menu
      * ignores the gamepad, so the button being mapped never also acts here. */
-    if (g_binding_capture_active) s_lock = true;
+    if (g_binding_capture_active || g_tdx_sc_cap >= 0) s_lock = true;
     else if (s_lock && !anyPad) s_lock = false;
     const bool live = !s_lock;
 
@@ -241,6 +448,10 @@ static void tdx_draw_menu(void) {
                 if (cut != std::string::npos) b0 = b0.substr(0, cut);
                 snprintf(items[n].label, 96, "%s: %s", kTdxControlNames[i], b0.c_str());
             }
+            items[n++].info = false;
+        }
+        for (int i = 0; i < TDX_SC_COUNT; ++i) {
+            snprintf(items[n].label, 96, "%s: %s", kTdxShortcutNames[i], tdx_sc_label(i).c_str());
             items[n++].info = false;
         }
         snprintf(items[n].label, 96, "Reset to defaults"); items[n++].info = false;
@@ -370,7 +581,7 @@ static void tdx_draw_menu(void) {
             int nf = s_down_first - (int)(dy / pitch + (dy > 0 ? 0.5f : -0.5f));
             first = nf < 0 ? 0 : (nf > maxFirst ? maxFirst : nf);
         }
-        if (clicked && !s_dragged && s_down_item >= 0 && !g_binding_capture_active) {
+        if (clicked && !s_dragged && s_down_item >= 0 && !g_binding_capture_active && g_tdx_sc_cap < 0) {
             sel = s_down_item;
             act = s_down_item;
             actDir = +1;
@@ -414,11 +625,16 @@ static void tdx_draw_menu(void) {
     }
 
     /* ---- clear a mapping with X on the Controls page ---- */
-    if (live && page == TDX_PAGE_CONTROLS && sel < 8 &&
+    if (live && page == TDX_PAGE_CONTROLS && sel < 8 + TDX_SC_COUNT &&
         ImGui::IsKeyPressed(ImGuiKey_GamepadFaceLeft, false)) {
-        const GBInputAction a = kTdxControlActions[sel];
-        assign_binding_slot(GB_CAPTURE_DEVICE_CONTROLLER, a, 0, make_binding(GB_INPUT_BINDING_NONE, 0));
-        assign_binding_slot(GB_CAPTURE_DEVICE_CONTROLLER, a, 1, make_binding(GB_INPUT_BINDING_NONE, 0));
+        if (sel < 8) {
+            const GBInputAction a = kTdxControlActions[sel];
+            assign_binding_slot(GB_CAPTURE_DEVICE_CONTROLLER, a, 0, make_binding(GB_INPUT_BINDING_NONE, 0));
+            assign_binding_slot(GB_CAPTURE_DEVICE_CONTROLLER, a, 1, make_binding(GB_INPUT_BINDING_NONE, 0));
+        } else {
+            g_tdx_sc_n[sel - 8] = 0;
+            save_runtime_preferences();
+        }
     }
 
     /* ---- act on the chosen row ---- */
@@ -432,8 +648,13 @@ static void tdx_draw_menu(void) {
         } else if (page == TDX_PAGE_CONTROLS) {
             if (act < 8) {
                 start_binding_capture(GB_CAPTURE_DEVICE_CONTROLLER, kTdxControlActions[act], 0);
-            } else if (act == 8) {
+            } else if (act < 8 + TDX_SC_COUNT) {
+                /* record a shortcut: hold the buttons together, then let go */
+                g_tdx_sc_cap = act - 8;
+                g_tdx_cap_n = 0;
+            } else if (act == 8 + TDX_SC_COUNT) {
                 set_default_input_bindings();
+                for (int i = 0; i < TDX_SC_COUNT; ++i) g_tdx_sc_n[i] = 0;
                 save_runtime_preferences();
                 tdx_pill("Controls reset");
             } else {
@@ -473,6 +694,14 @@ static bool tdx_menu_loop(GBContext* ctx) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             ImGui_ImplSDL2_ProcessEvent(&e);
+            if (g_tdx_sc_cap >= 0 && e.type == SDL_KEYDOWN && e.key.repeat == 0 &&
+                (e.key.keysym.scancode == SDL_SCANCODE_AC_BACK ||
+                 e.key.keysym.scancode == SDL_SCANCODE_ESCAPE)) {
+                g_tdx_sc_cap = -1;
+                g_tdx_cap_n = 0;
+                continue;
+            }
+            if (tdx_shortcut_event(&e, false)) continue;
             /* Android Back cancels a remap in progress (the capture code
              * would otherwise swallow it). */
             if (g_binding_capture_active && e.type == SDL_KEYDOWN && e.key.repeat == 0 &&
@@ -531,4 +760,5 @@ static bool tdx_menu_loop(GBContext* ctx) {
     if (g_audio_device) SDL_PauseAudioDevice(g_audio_device, 0);
     return keep_running;
 }
+
 /* ---- end Tetroid DX menu ---- */
