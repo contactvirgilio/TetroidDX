@@ -37,6 +37,14 @@ from the celebration states to `$08`. `android/skipceleb_toggle.asm` picks
 between the original and patched values at runtime. The original patch file is
 not redistributed here; get it from the link above.
 
+### Korobeiniki (Music Fix)
+Based on Tetris DX - Music Fix by **Marc Robledo** (2020), which makes Music
+Type A play the classic Korobeiniki theme and changes the two "close to game
+over" songs to match. `android/korobeiniki_toggle.asm` makes the same song
+changes through small routines that check a bit set from the app's menu, so
+the original music comes back when it is off. The original patch file is not
+redistributed here.
+
 ## Recompiler, libraries and tools
 - [GB Recompiled](https://github.com/arcanite24/gb-recompiled) by
   **arcanite24** (Brandon G. Neri), MIT License: static recompiler and runtime.

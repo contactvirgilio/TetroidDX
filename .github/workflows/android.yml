@@ -58,7 +58,7 @@ jobs:
           cmake -S rgbds -B rgbds/build -G Ninja -DCMAKE_BUILD_TYPE=Release
           ninja -C rgbds/build rgbasm rgblink rgbfix
 
-      - name: Apply hard drop, ghost piece, Don't Panic and Skip Celebrations patches
+      - name: Apply hard drop, ghost piece, Don't Panic, Skip Celebrations and Korobeiniki patches
         run: |
           python3 - <<'EOF'
           import os, sys
@@ -78,6 +78,17 @@ jobs:
           if rom[0x4568:0x4574] != want:
               sys.exit("Skip Celebrations: unexpected code at bank 1 $4568")
           print("Skip Celebrations site check OK")
+          # Korobeiniki (Music Fix by Marc Robledo): hooks in bank 1 $4C30 and
+          # bank 5 $4D00, routines in bank 0 $3FC4 and bank 5 $7FEB, options copy at bank 5 $7FFF.
+          if rom[0x4C2B:0x4C38] != bytes.fromhex("3E5EEA53AC3E5FEA54AC3E4CEA"):
+              sys.exit("Korobeiniki: unexpected code at bank 1 $4C2B")
+          if rom[0x14D00:0x14D05] != bytes.fromhex("0137001808"):
+              sys.exit("Korobeiniki: unexpected code at bank 5 $4D00")
+          if rom[0x14D10:0x14D16] != bytes.fromhex("EA0EACC3183F"):
+              sys.exit("Korobeiniki: unexpected code at bank 5 $4D10")
+          if any(rom[0x3FC1:0x4000]) or any(rom[0x17FEB:0x18000]):
+              sys.exit("Korobeiniki: bank 0 $3FC1-$3FFF or bank 5 $7FEB-$7FFF is not free")
+          print("Korobeiniki site check OK")
           EOF
           mkdir -p work
           python3 android/prepare_dontpanic.py "$ROM_PATH" work/dontpanic_orig.inc
@@ -86,7 +97,8 @@ jobs:
           "$R/rgbasm" -E android/harddrop_toggle.asm -o work/harddrop.o
           "$R/rgbasm" -E -I work/ android/dontpanic_toggle.asm -o work/dontpanic.o
           "$R/rgbasm" -E android/skipceleb_toggle.asm -o work/skipceleb.o
-          "$R/rgblink" -O "$ROM_PATH" -o work/patched.gbc work/harddrop.o work/dontpanic.o work/skipceleb.o
+          "$R/rgbasm" -E android/korobeiniki_toggle.asm -o work/korobeiniki.o
+          "$R/rgblink" -O "$ROM_PATH" -o work/patched.gbc work/harddrop.o work/dontpanic.o work/skipceleb.o work/korobeiniki.o
           cmp -l "$ROM_PATH" work/patched.gbc | wc -l
 
       - name: Build the recompiler

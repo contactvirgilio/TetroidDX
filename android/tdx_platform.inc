@@ -26,8 +26,13 @@ static bool g_tdx_dontpanic = false;
 /* Skip Celebrations by llakssz (romhacking.net #4734), see skipceleb_toggle.asm.
  * Saved as tdx.skipceleb. */
 static bool g_tdx_skipceleb = false;
+/* Korobeiniki: Music Type A plays the classic Tetris song, based on
+ * "Tetris DX - Music Fix" by Marc Robledo, see korobeiniki_toggle.asm.
+ * Saved as tdx.korobeiniki. */
+static bool g_tdx_korobeiniki = false;
 static int g_tdx_ghost = 0;
 #define TDX_OPTIONS_OFFSET 0x7FFFu
+#define TDX_OPTIONS_OFFSET_B5 0x17FFFu   /* bank-5 copy, read by the music hook */
 
 static uint8_t tdx_options_byte(void) {
     uint8_t v = 0;
@@ -36,6 +41,7 @@ static uint8_t tdx_options_byte(void) {
     if (g_tdx_ghost == 2) v |= 0x06;
     if (g_tdx_dontpanic) v |= 0x08;
     if (g_tdx_skipceleb) v |= 0x10;
+    if (g_tdx_korobeiniki) v |= 0x20;
     return v;
 }
 
@@ -43,6 +49,9 @@ static uint8_t tdx_options_byte(void) {
 static void tdx_sync_options(GBContext* ctx) {
     if (ctx && ctx->rom && ctx->rom_size > TDX_OPTIONS_OFFSET) {
         ctx->rom[TDX_OPTIONS_OFFSET] = tdx_options_byte();
+    }
+    if (ctx && ctx->rom && ctx->rom_size > TDX_OPTIONS_OFFSET_B5) {
+        ctx->rom[TDX_OPTIONS_OFFSET_B5] = tdx_options_byte();
     }
 }
 
@@ -344,6 +353,9 @@ extern "C" int tdx_fill_rom(uint8_t* dst, size_t size) {
     }
     if (size > TDX_OPTIONS_OFFSET) {
         dst[TDX_OPTIONS_OFFSET] = tdx_options_byte();
+    }
+    if (size > TDX_OPTIONS_OFFSET_B5) {
+        dst[TDX_OPTIONS_OFFSET_B5] = tdx_options_byte();
     }
     return 1;
 }

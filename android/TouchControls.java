@@ -34,7 +34,8 @@ public class TouchControls extends View {
     static native boolean nativeMenuOpen();
     static native boolean nativeHardDropOn();
     /** ids: 0 Hard Drop, 1 Ghost, 2 Don't Panic, 3 Skip Celebrations, 4 Palette,
-     *  5 Scanlines, 6 Mute, 7 menu page (-1 closed, 0 PATCHES card, 1 Controls, 2 Credits). */
+     *  5 Scanlines, 6 Mute, 7 menu page (-1 closed, 0 PATCHES card, 1 Controls, 2 Credits),
+     *  8 Korobeiniki. */
     static native int nativeGet(int id);
     static native void nativeSet(int id, int value);
     /** bits: 1 open the PATCHES card, 2 close, 4 Controls page, 8 Credits page. */
@@ -602,10 +603,11 @@ public class TouchControls extends View {
 
     // -------------------- PATCHES card: the main menu (same style as DKC STATES)
 
-    private static final String[] PATCH_NAMES = {"Hard Drop", "Ghost Piece", "Don't Panic", "Skip Celebrations"};
+    private static final String[] PATCH_NAMES = {"Hard Drop", "Ghost Piece", "Don't Panic", "Skip Celebrations", "Korobeiniki"};
+    private static final int NT = 5;  // tiles: two columns, the last one full width
     private final RectF patchesCard = new RectF();
-    private final RectF[] tileRect = {new RectF(), new RectF(), new RectF(), new RectF()};
-    private int sel = 0;              // tile 0-3
+    private final RectF[] tileRect = {new RectF(), new RectF(), new RectF(), new RectF(), new RectF()};
+    private int sel = 0;              // tile 0-4
     private boolean navActive = false; // gamepad in use on the card: show the hint line
     private int touchItem = -1;
     private boolean touchOutside = false;
@@ -623,7 +625,8 @@ public class TouchControls extends View {
             case 0: return nget(0) != 0 ? "On" : "Off";
             case 1: return GHOST_NAMES[Math.max(0, Math.min(2, nget(1)))];
             case 2: return nget(2) != 0 ? "On" : "Off";
-            default: return nget(3) != 0 ? "On" : "Off";
+            case 3: return nget(3) != 0 ? "On" : "Off";
+            default: return nget(8) != 0 ? "On" : "Off";
         }
     }
 
@@ -633,6 +636,7 @@ public class TouchControls extends View {
             case 1: nset(1, (nget(1) + 1) % 3); break;
             case 2: nset(2, nget(2) != 0 ? 0 : 1); break;
             case 3: nset(3, nget(3) != 0 ? 0 : 1); break;
+            case 4: nset(8, nget(8) != 0 ? 0 : 1); break;
             default: return;
         }
         buzz();
@@ -680,6 +684,15 @@ public class TouchControls extends View {
                 c.drawLine(cx + s * 0.1f, cy - s * 0.7f, cx + s * 0.55f, cy - s * 0.45f, paint);
                 c.drawLine(cx - s * 0.8f, cy + s * 0.8f, cx + s * 0.8f, cy - s * 0.8f, paint);
                 break;
+            case 4: // korobeiniki: two beamed music notes
+                c.drawLine(cx - s * 0.45f, cy - s * 0.55f, cx - s * 0.45f, cy + s * 0.45f, paint);
+                c.drawLine(cx + s * 0.55f, cy - s * 0.75f, cx + s * 0.55f, cy + s * 0.25f, paint);
+                c.drawLine(cx - s * 0.45f, cy - s * 0.55f, cx + s * 0.55f, cy - s * 0.75f, paint);
+                paint.setStyle(Paint.Style.FILL);
+                c.drawOval(cx - s * 0.95f, cy + s * 0.25f, cx - s * 0.4f, cy + s * 0.7f, paint);
+                c.drawOval(cx + s * 0.05f, cy + s * 0.05f, cx + s * 0.6f, cy + s * 0.5f, paint);
+                paint.setStyle(Paint.Style.STROKE);
+                break;
             default: // skip celebrations: skip-to-end
                 path.reset();
                 path.moveTo(cx - s * 0.75f, cy - s * 0.5f); path.lineTo(cx - s * 0.75f, cy + s * 0.5f);
@@ -697,10 +710,10 @@ public class TouchControls extends View {
         float d = density, W = getWidth(), H = getHeight();
         float pad = 22f * d, gap = 14f * d, titleH = 26f * d, hintH = 30f * d;
         float cw = Math.min(W * 0.94f, 600f * d);
-        float tw = (cw - 2f * pad - gap) / 2f, th = tw * 0.62f;
-        float ch = pad + titleH + 2f * th + gap + hintH;
+        float tw = (cw - 2f * pad - gap) / 2f, th = tw * 0.56f;
+        float ch = pad + titleH + 3f * th + 2f * gap + hintH;
         if (ch > H * 0.94f) {   // short landscape screens: shrink the tiles to fit
-            th = (H * 0.94f - pad - titleH - gap - hintH) / 2f;
+            th = (H * 0.94f - pad - titleH - 2f * gap - hintH) / 3f;
             ch = H * 0.94f;
         }
         float x0 = (W - cw) / 2f, y0 = (H - ch) / 2f;
@@ -721,9 +734,10 @@ public class TouchControls extends View {
         c.drawText("PATCHES", x0 + pad, y0 + pad + 8f * d, paint);
         paint.setLetterSpacing(0f);
 
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < NT; i++) {
             float bx = x0 + pad + (i % 2) * (tw + gap), by = y0 + pad + titleH + (i / 2) * (th + gap);
-            tileRect[i].set(bx, by, bx + tw, by + th);
+            float tileW = (i == NT - 1 && NT % 2 == 1) ? 2f * tw + gap : tw;
+            tileRect[i].set(bx, by, bx + tileW, by + th);
             boolean selShown = i == sel;
             fillC(0xFF1E2226, 1f);
             c.drawRoundRect(tileRect[i], 12f * d, 12f * d, paint);
@@ -732,9 +746,9 @@ public class TouchControls extends View {
             String val = patchValue(i);
             boolean on = !val.equals("Off");
             int col = selShown ? 0xFFFFFFFF : 0xFFC8CDD2;
-            patchIcon(c, i, bx + tw / 2f, by + th * 0.33f, Math.min(15f * d, th * 0.16f), on ? YELLOW : col);
-            textC(c, PATCH_NAMES[i], bx + tw / 2f, by + th * 0.66f, Math.min(15f * d, th * 0.15f), col, 1f, semi);
-            textC(c, val, bx + tw / 2f, by + th * 0.85f, Math.min(12.5f * d, th * 0.125f),
+            patchIcon(c, i, bx + tileW / 2f, by + th * 0.33f, Math.min(15f * d, th * 0.16f), on ? YELLOW : col);
+            textC(c, PATCH_NAMES[i], bx + tileW / 2f, by + th * 0.66f, Math.min(15f * d, th * 0.15f), col, 1f, semi);
+            textC(c, val, bx + tileW / 2f, by + th * 0.85f, Math.min(12.5f * d, th * 0.125f),
                     on ? YELLOW : 0xFF9AA4AD, 1f, Typeface.DEFAULT);
         }
 
@@ -757,7 +771,7 @@ public class TouchControls extends View {
             navActive = false;
             touchOutside = !patchesCard.contains(x, y);
             touchItem = -1;
-            for (int i = 0; i < 4; i++) if (tileRect[i].contains(x, y)) touchItem = i;
+            for (int i = 0; i < NT; i++) if (tileRect[i].contains(x, y)) touchItem = i;
             if (touchItem >= 0) sel = touchItem;
             invalidate();
         } else if (a == MotionEvent.ACTION_UP) {
@@ -789,8 +803,8 @@ public class TouchControls extends View {
         boolean first = e.getRepeatCount() == 0;
         int row = sel / 2, col = sel % 2;
         switch (code) {
-            case KeyEvent.KEYCODE_DPAD_UP: row = 0; break;
-            case KeyEvent.KEYCODE_DPAD_DOWN: row = 1; break;
+            case KeyEvent.KEYCODE_DPAD_UP: row = Math.max(0, row - 1); break;
+            case KeyEvent.KEYCODE_DPAD_DOWN: row = Math.min((NT - 1) / 2, row + 1); break;
             case KeyEvent.KEYCODE_DPAD_LEFT: col = 0; break;
             case KeyEvent.KEYCODE_DPAD_RIGHT: col = 1; break;
             case KeyEvent.KEYCODE_BUTTON_A:
@@ -810,7 +824,7 @@ public class TouchControls extends View {
                 // any other gamepad press is kept from the paused game
                 return KeyEvent.isGamepadButton(code);
         }
-        sel = row * 2 + col;
+        sel = Math.min(NT - 1, row * 2 + col);
         navActive = true;
         invalidate();
         return true;

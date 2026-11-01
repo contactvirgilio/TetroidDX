@@ -17,6 +17,7 @@ exactly like the original):
 - **Ghost Piece:** Off, Light or Dark.
 - **Don't Panic:** removes the game's danger reaction when the stack gets high.
 - **Skip Celebrations:** skips the end-of-game celebration scenes.
+- **Korobeiniki:** Music Type A plays the classic Tetris theme.
 
 **Display:**
 - **Palettes:** Original, GBC LCD (colour corrected to look like the real Game
@@ -29,7 +30,7 @@ exactly like the original):
 - Touch controls (D-pad, A, B, Select, Start, Menu) that hide when a gamepad is
   used and come back when you touch the screen.
 - PATCHES card (the main menu, in the style of the DKC ports): tiles to switch
-  Hard Drop, Ghost Piece, Don't Panic and Skip Celebrations. Opened with the Menu quick button, Select+Down, Android Back, Guide
+  Hard Drop, Ghost Piece, Don't Panic, Skip Celebrations and Korobeiniki. Opened with the Menu quick button, Select+Down, Android Back, Guide
   or a gamepad shortcut. The game pauses while it is open.
 - Quick buttons top right (Mute, Palette, Scanlines, Menu) that fade after 15 s.
 - Gamepad shortcuts (buttons held together): Menu, Toggle Hard Drop, Cycle
@@ -90,7 +91,7 @@ Requires Android 8 or newer (arm64).
 ## Credits
 
 See [CREDITS.md](CREDITS.md). In short: hard drop and ghost piece by
-lightbulb-sun (MIT), Don't Panic by DevEd, Skip Celebrations by llakssz, and
+lightbulb-sun (MIT), Don't Panic by DevEd, Skip Celebrations by llakssz, Korobeiniki (Music Fix) by Marc Robledo, and
 GB Recompiled by arcanite24 (MIT), plus SDL2, Dear ImGui and RGBDS.
 
 Tetris DX is a trademark of its respective owners. This is an unofficial fan
