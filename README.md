@@ -11,13 +11,16 @@ APK itself never contains any part of the game.
 
 ## Features
 
-**Gameplay toggles** (all off by default; with everything off the game plays
-exactly like the original):
+**Gameplay toggles** (all off by default; with everything off and the Randomizer on Tetris DX,
+the game runs its original code):
 - **Hard Drop:** press Up to drop the piece instantly.
 - **Ghost Piece:** Off, Light or Dark.
 - **Don't Panic:** removes the game's danger reaction when the stack gets high.
 - **Skip Celebrations:** skips the end-of-game celebration scenes.
 - **Korobeiniki:** Music Type A plays the classic Tetris theme.
+- **SRS Rotation:** Super Rotation System spawn orientation, wall kicks and
+  next-piece preview.
+- **Randomizer:** Tetris DX (original), 7-Bag, or 35-Bag (TGM-style).
 
 **Display:**
 - **Palettes:** Original, GBC LCD (colour corrected to look like the real Game
@@ -30,7 +33,8 @@ exactly like the original):
 - Touch controls (D-pad, A, B, Select, Start, Menu) that hide when a gamepad is
   used and come back when you touch the screen.
 - PATCHES card (the main menu, in the style of the DKC ports): tiles to switch
-  Hard Drop, Ghost Piece, Don't Panic, Skip Celebrations and Korobeiniki. Opened with the Menu quick button, Select+Down, Android Back, Guide
+  Hard Drop, Ghost Piece, Don't Panic, Skip Celebrations, Korobeiniki, SRS
+  Rotation and Randomizer. Opened with the Menu quick button, Select+Down, Android Back, Guide
   or a gamepad shortcut. The game pauses while it is open.
 - Quick buttons top right (Mute, Palette, Scanlines, Menu) that fade after 15 s.
 - Gamepad shortcuts (buttons held together): Menu, Toggle Hard Drop, Cycle

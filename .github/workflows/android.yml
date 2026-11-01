@@ -58,7 +58,7 @@ jobs:
           cmake -S rgbds -B rgbds/build -G Ninja -DCMAKE_BUILD_TYPE=Release
           ninja -C rgbds/build rgbasm rgblink rgbfix
 
-      - name: Apply hard drop, ghost piece, Don't Panic, Skip Celebrations and Korobeiniki patches
+      - name: Apply hard drop, ghost piece, Don't Panic, Skip Celebrations, Korobeiniki, SRS and Randomizer patches
         run: |
           python3 - <<'EOF'
           import os, sys
@@ -89,6 +89,24 @@ jobs:
           if any(rom[0x3FC1:0x4000]) or any(rom[0x17FEB:0x18000]):
               sys.exit("Korobeiniki: bank 0 $3FC1-$3FFF or bank 5 $7FEB-$7FFF is not free")
           print("Korobeiniki site check OK")
+          # SRS: hooks at bank 1 $57C5, $581E, $591E; code at bank 1 $7EE0-$7F49
+          # and bank 0 $3C00-$3EFF; preview tables at bank 1 $4B75/$4B84.
+          if (rom[0x57C5:0x57C8] != bytes.fromhex("FA82AF") or rom[0x581E:0x5821] != bytes.fromhex("FA82AF")
+                  or rom[0x591E:0x5923] != bytes.fromhex("3E00EA81AF")
+                  or rom[0x5932:0x5935] != bytes.fromhex("2100AD")
+                  or rom[0x4B75:0x4B78] != bytes.fromhex("21685F")
+                  or rom[0x4B84:0x4B87] != bytes.fromhex("21A05F")):
+              sys.exit("SRS: unexpected code at a hook site")
+          if any(rom[0x7EE0:0x7F4A]) or any(rom[0x3C00:0x3F00]):
+              sys.exit("SRS: free space is not empty")
+          print("SRS site check OK")
+          # Randomizer: hook at bank 1 $58BC, code at bank 1 $7F30 and bank 0
+          # $3A00-$3BFF, mode byte at bank 0 $3FFF.
+          if rom[0x58BC:0x58C2] != bytes.fromhex("FA83AF3CFE07") or rom[0x58E8:0x58EB] != bytes.fromhex("EA84AF"):
+              sys.exit("Randomizer: unexpected code at bank 1 $58BC")
+          if any(rom[0x3A00:0x3C00]):
+              sys.exit("Randomizer: bank 0 $3A00-$3BFF is not free")
+          print("Randomizer site check OK")
           EOF
           mkdir -p work
           python3 android/prepare_dontpanic.py "$ROM_PATH" work/dontpanic_orig.inc
@@ -98,7 +116,9 @@ jobs:
           "$R/rgbasm" -E -I work/ android/dontpanic_toggle.asm -o work/dontpanic.o
           "$R/rgbasm" -E android/skipceleb_toggle.asm -o work/skipceleb.o
           "$R/rgbasm" -E android/korobeiniki_toggle.asm -o work/korobeiniki.o
-          "$R/rgblink" -O "$ROM_PATH" -o work/patched.gbc work/harddrop.o work/dontpanic.o work/skipceleb.o work/korobeiniki.o
+          "$R/rgbasm" -E android/srs_toggle.asm -o work/srs.o
+          "$R/rgbasm" -E android/randomizer_toggle.asm -o work/randomizer.o
+          "$R/rgblink" -O "$ROM_PATH" -o work/patched.gbc work/harddrop.o work/dontpanic.o work/skipceleb.o work/korobeiniki.o work/srs.o work/randomizer.o
           cmp -l "$ROM_PATH" work/patched.gbc | wc -l
 
       - name: Build the recompiler

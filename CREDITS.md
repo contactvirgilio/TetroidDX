@@ -45,6 +45,15 @@ changes through small routines that check a bit set from the app's menu, so
 the original music comes back when it is off. The original patch file is not
 redistributed here.
 
+### SRS Rotation and Randomizer
+Written for Tetroid DX (`android/srs_toggle.asm`, `android/randomizer_toggle.asm`).
+The SRS wall kick data and the 7-bag and TGM randomizer descriptions come from
+[tetris.wiki](https://tetris.wiki/Super_Rotation_System) and the
+[Hard Drop wiki](https://harddrop.com/wiki/TGM_randomizer). 35-Bag is
+TGM-style: modelled on the Tetris The Grand Master 3 randomizer, not a
+byte-exact copy. Random numbers come from the xorshift 7/9/8 generator by
+John Metcalf, stirred with the Game Boy timer.
+
 ## Recompiler, libraries and tools
 - [GB Recompiled](https://github.com/arcanite24/gb-recompiled) by
   **arcanite24** (Brandon G. Neri), MIT License: static recompiler and runtime.

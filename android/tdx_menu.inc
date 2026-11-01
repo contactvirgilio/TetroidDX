@@ -233,7 +233,7 @@ static bool tdx_shortcut_event(const SDL_Event* e, bool allow_fire) {
 #if defined(__ANDROID__)
 /* Java side of the options. ids: 0 Hard Drop, 1 Ghost, 2 Don't Panic,
  * 3 Skip Celebrations, 4 Palette, 5 Scanlines, 6 Mute, 7 menu page (-1 closed),
- * 8 Korobeiniki. */
+ * 8 Korobeiniki, 9 SRS, 10 Randomizer. */
 extern "C" JNIEXPORT jint JNICALL
 Java_org_tetrisdx_recomp_TouchControls_nativeGet(JNIEnv* env, jclass cls, jint id) {
     (void)env; (void)cls;
@@ -247,6 +247,8 @@ Java_org_tetrisdx_recomp_TouchControls_nativeGet(JNIEnv* env, jclass cls, jint i
         case 6: return g_audio_muted.load(std::memory_order_relaxed) ? 1 : 0;
         case 7: return g_show_menu ? g_tdx_menu_page : -1;
         case 8: return g_tdx_korobeiniki ? 1 : 0;
+        case 9: return g_tdx_srs ? 1 : 0;
+        case 10: return g_tdx_randomizer;
         default: return 0;
     }
 }
@@ -263,6 +265,8 @@ Java_org_tetrisdx_recomp_TouchControls_nativeSet(JNIEnv* env, jclass cls, jint i
         case 5: g_tdx_scanlines = v != 0; break;
         case 6: g_audio_muted.store(v != 0, std::memory_order_relaxed); break;
         case 8: g_tdx_korobeiniki = v != 0; break;
+        case 9: g_tdx_srs = v != 0; break;
+        case 10: g_tdx_randomizer = (v >= 0 && v <= 2) ? (int)v : 0; break;
         default: return;
     }
     g_tdx_req.fetch_or(TDX_REQ_SAVE);
@@ -467,6 +471,8 @@ static void tdx_draw_menu(void) {
             "Don't Panic: DevEd",
             "Skip Celebrations: llakssz",
             "Korobeiniki (Music Fix): Marc Robledo",
+            "SRS: rotation data from tetris.wiki",
+            "35-Bag (TGM-style): after the TGM3 randomizer",
             "Recompiler: GB Recompiled by arcanite24 (MIT)",
             "SDL2 (zlib), Dear ImGui (MIT), RGBDS",
             "Font: BPreplay (SIL Open Font License)",

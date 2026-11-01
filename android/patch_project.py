@@ -99,7 +99,7 @@ def rom_patch_table(original_rom, patched_rom):
     if len(a) != len(b):
         sys.exit("PATCH FAILED [rom diff]: patched ROM has a different size")
     diff = [(i, b[i]) for i in range(len(a)) if a[i] != b[i]]
-    if not 1 <= len(diff) <= 400:
+    if not 1 <= len(diff) <= 1200:
         sys.exit(f"PATCH FAILED [rom diff]: unexpected number of changed bytes: {len(diff)}")
     print(f"ROM patch: {len(diff)} changed bytes")
     rows = ",\n".join(f"    {{0x{o:06X}u, 0x{v:02X}u}}" for o, v in diff)
@@ -179,6 +179,15 @@ def patch_platform(proj, patch_table):
         "                    g_tdx_palette = (pv >= 0 && pv < TDX_PAL_COUNT) ? (int)pv : TDX_PAL_GBC_LCD;\n"
         "                    continue;\n"
         "                }\n"
+        "                if (strcmp(key, \"tdx.rand\") == 0) {\n"
+        "                    long rv = strtol(value, NULL, 10);\n"
+        "                    g_tdx_randomizer = (rv >= 0 && rv <= 2) ? (int)rv : 0;\n"
+        "                    continue;\n"
+        "                }\n"
+        "                if (strcmp(key, \"tdx.srs\") == 0) {\n"
+        "                    g_tdx_srs = (strcmp(value, \"0\") != 0);\n"
+        "                    continue;\n"
+        "                }\n"
         "                if (strcmp(key, \"tdx.korobeiniki\") == 0) {\n"
         "                    g_tdx_korobeiniki = (strcmp(value, \"0\") != 0);\n"
         "                    continue;\n"
@@ -209,6 +218,8 @@ def patch_platform(proj, patch_table):
         "    fprintf(file, \"tdx.dontpanic=%d\\n\", g_tdx_dontpanic ? 1 : 0);\n"
         "    fprintf(file, \"tdx.skipceleb=%d\\n\", g_tdx_skipceleb ? 1 : 0);\n"
         "    fprintf(file, \"tdx.korobeiniki=%d\\n\", g_tdx_korobeiniki ? 1 : 0);\n"
+        "    fprintf(file, \"tdx.srs=%d\\n\", g_tdx_srs ? 1 : 0);\n"
+        "    fprintf(file, \"tdx.rand=%d\\n\", g_tdx_randomizer);\n"
         "    fprintf(file, \"display.pal=%d\\n\", g_tdx_palette);\n"
         "    for (int sc = 0; sc < TDX_SC_COUNT; ++sc) fprintf(file, \"tdx.sc%d=%s\\n\", sc, tdx_sc_value(sc).c_str());\n",
         1, "prefs save")
@@ -510,8 +521,8 @@ android {
         applicationId "org.tetrisdx.recomp"
         minSdk 26
         targetSdk 34
-        versionCode 21
-        versionName "1.4.0"
+        versionCode 22
+        versionName "1.5.0"
         externalNativeBuild {
             cmake {
                 arguments "-DANDROID_STL=c++_shared", "-DSDL2_SOURCE_DIR=${sdl2SourceDir}"

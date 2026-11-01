@@ -30,6 +30,12 @@ static bool g_tdx_skipceleb = false;
  * "Tetris DX - Music Fix" by Marc Robledo, see korobeiniki_toggle.asm.
  * Saved as tdx.korobeiniki. */
 static bool g_tdx_korobeiniki = false;
+/* Super Rotation System (see srs_toggle.asm). Saved as tdx.srs. */
+static bool g_tdx_srs = false;
+/* Randomizer (see randomizer_toggle.asm): 0 Tetris DX, 1 7-bag, 2 35-bag.
+ * Written to bank 0 $3FFF. Saved as tdx.rand. */
+static int g_tdx_randomizer = 0;
+#define TDX_RANDOMIZER_OFFSET 0x3FFFu
 static int g_tdx_ghost = 0;
 #define TDX_OPTIONS_OFFSET 0x7FFFu
 #define TDX_OPTIONS_OFFSET_B5 0x17FFFu   /* bank-5 copy, read by the music hook */
@@ -42,6 +48,7 @@ static uint8_t tdx_options_byte(void) {
     if (g_tdx_dontpanic) v |= 0x08;
     if (g_tdx_skipceleb) v |= 0x10;
     if (g_tdx_korobeiniki) v |= 0x20;
+    if (g_tdx_srs) v |= 0x40;
     return v;
 }
 
@@ -52,6 +59,9 @@ static void tdx_sync_options(GBContext* ctx) {
     }
     if (ctx && ctx->rom && ctx->rom_size > TDX_OPTIONS_OFFSET_B5) {
         ctx->rom[TDX_OPTIONS_OFFSET_B5] = tdx_options_byte();
+    }
+    if (ctx && ctx->rom && ctx->rom_size > TDX_RANDOMIZER_OFFSET) {
+        ctx->rom[TDX_RANDOMIZER_OFFSET] = (uint8_t)g_tdx_randomizer;
     }
 }
 
@@ -356,6 +366,9 @@ extern "C" int tdx_fill_rom(uint8_t* dst, size_t size) {
     }
     if (size > TDX_OPTIONS_OFFSET_B5) {
         dst[TDX_OPTIONS_OFFSET_B5] = tdx_options_byte();
+    }
+    if (size > TDX_RANDOMIZER_OFFSET) {
+        dst[TDX_RANDOMIZER_OFFSET] = (uint8_t)g_tdx_randomizer;
     }
     return 1;
 }

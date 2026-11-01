@@ -35,7 +35,7 @@ public class TouchControls extends View {
     static native boolean nativeHardDropOn();
     /** ids: 0 Hard Drop, 1 Ghost, 2 Don't Panic, 3 Skip Celebrations, 4 Palette,
      *  5 Scanlines, 6 Mute, 7 menu page (-1 closed, 0 PATCHES card, 1 Controls, 2 Credits),
-     *  8 Korobeiniki. */
+     *  8 Korobeiniki, 9 SRS, 10 Randomizer (0 DX, 1 7-Bag, 2 35-Bag). */
     static native int nativeGet(int id);
     static native void nativeSet(int id, int value);
     /** bits: 1 open the PATCHES card, 2 close, 4 Controls page, 8 Credits page. */
@@ -61,6 +61,7 @@ public class TouchControls extends View {
     private static final int WINE_LABEL = 0xFFF2DCE4;
 
     private static final String[] GHOST_NAMES = {"Off", "Light", "Dark"};
+    private static final String[] RAND_NAMES = {"Tetris DX", "7-Bag", "35-Bag (TGM-style)"};
     private static final String[] PALETTE_NAMES = {"Original", "GBC LCD", "Pastel", "Swamp", "Sunset"};
 
     private final boolean[] pressed = new boolean[COUNT];
@@ -603,11 +604,11 @@ public class TouchControls extends View {
 
     // -------------------- PATCHES card: the main menu (same style as DKC STATES)
 
-    private static final String[] PATCH_NAMES = {"Hard Drop", "Ghost Piece", "Don't Panic", "Skip Celebrations", "Korobeiniki"};
-    private static final int NT = 5;  // tiles: two columns, the last one full width
+    private static final String[] PATCH_NAMES = {"Hard Drop", "Ghost Piece", "Don't Panic", "Skip Celebrations", "Korobeiniki", "SRS Rotation", "Randomizer"};
+    private static final int NT = 7;  // tiles: two columns (an odd last one is full width)
     private final RectF patchesCard = new RectF();
-    private final RectF[] tileRect = {new RectF(), new RectF(), new RectF(), new RectF(), new RectF()};
-    private int sel = 0;              // tile 0-4
+    private final RectF[] tileRect = {new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF()};
+    private int sel = 0;              // tile 0-6
     private boolean navActive = false; // gamepad in use on the card: show the hint line
     private int touchItem = -1;
     private boolean touchOutside = false;
@@ -626,7 +627,9 @@ public class TouchControls extends View {
             case 1: return GHOST_NAMES[Math.max(0, Math.min(2, nget(1)))];
             case 2: return nget(2) != 0 ? "On" : "Off";
             case 3: return nget(3) != 0 ? "On" : "Off";
-            default: return nget(8) != 0 ? "On" : "Off";
+            case 4: return nget(8) != 0 ? "On" : "Off";
+            case 5: return nget(9) != 0 ? "On" : "Off";
+            default: return RAND_NAMES[Math.max(0, Math.min(2, nget(10)))];
         }
     }
 
@@ -637,6 +640,8 @@ public class TouchControls extends View {
             case 2: nset(2, nget(2) != 0 ? 0 : 1); break;
             case 3: nset(3, nget(3) != 0 ? 0 : 1); break;
             case 4: nset(8, nget(8) != 0 ? 0 : 1); break;
+            case 5: nset(9, nget(9) != 0 ? 0 : 1); break;
+            case 6: nset(10, (nget(10) + 1) % 3); break;
             default: return;
         }
         buzz();
@@ -693,7 +698,30 @@ public class TouchControls extends View {
                 c.drawOval(cx + s * 0.05f, cy + s * 0.05f, cx + s * 0.6f, cy + s * 0.5f, paint);
                 paint.setStyle(Paint.Style.STROKE);
                 break;
-            default: // skip celebrations: skip-to-end
+            case 5: { // SRS: a T piece pointing up (its SRS spawn state), four outlined cells
+                float q = s * 0.62f, g = q * 0.08f;
+                paint.setStrokeWidth(Math.max(2f, q * 0.14f));
+                paint.setStrokeJoin(Paint.Join.MITER);
+                float x0 = cx - 1.5f * q, y0 = cy - q;
+                int[][] cells = {{1, 0}, {0, 1}, {1, 1}, {2, 1}};
+                for (int[] cell : cells) {
+                    float l = x0 + cell[0] * q, t = y0 + cell[1] * q;
+                    c.drawRect(l + g, t + g, l + q - g, t + q - g, paint);
+                }
+                break;
+            }
+            case 6: { // randomizer: a die showing three
+                float r = s * 0.85f;
+                c.drawRoundRect(cx - r, cy - r, cx + r, cy + r, r * 0.3f, r * 0.3f, paint);
+                paint.setStyle(Paint.Style.FILL);
+                float o = r * 0.5f, dot = Math.max(2f, r * 0.17f);
+                c.drawCircle(cx - o, cy - o, dot, paint);
+                c.drawCircle(cx, cy, dot, paint);
+                c.drawCircle(cx + o, cy + o, dot, paint);
+                paint.setStyle(Paint.Style.STROKE);
+                break;
+            }
+            case 3: // skip celebrations: skip-to-end
                 path.reset();
                 path.moveTo(cx - s * 0.75f, cy - s * 0.5f); path.lineTo(cx - s * 0.75f, cy + s * 0.5f);
                 path.lineTo(cx - s * 0.05f, cy); path.close();
@@ -710,10 +738,11 @@ public class TouchControls extends View {
         float d = density, W = getWidth(), H = getHeight();
         float pad = 22f * d, gap = 14f * d, titleH = 26f * d, hintH = 30f * d;
         float cw = Math.min(W * 0.94f, 600f * d);
-        float tw = (cw - 2f * pad - gap) / 2f, th = tw * 0.56f;
-        float ch = pad + titleH + 3f * th + 2f * gap + hintH;
+        final int rows = (NT + 1) / 2;
+        float tw = (cw - 2f * pad - gap) / 2f, th = tw * 0.5f;
+        float ch = pad + titleH + rows * th + (rows - 1) * gap + hintH;
         if (ch > H * 0.94f) {   // short landscape screens: shrink the tiles to fit
-            th = (H * 0.94f - pad - titleH - 2f * gap - hintH) / 3f;
+            th = (H * 0.94f - pad - titleH - (rows - 1) * gap - hintH) / rows;
             ch = H * 0.94f;
         }
         float x0 = (W - cw) / 2f, y0 = (H - ch) / 2f;
