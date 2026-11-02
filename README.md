@@ -32,7 +32,7 @@ the game runs its original code):
 **Controls and app:**
 - Touch controls (D-pad, A, B, Select, Start, Menu) that hide when a gamepad is
   used and come back when you touch the screen.
-- PATCHES card (the main menu, in the style of the DKC ports): tiles to switch
+- PATCHES card tiles to switch:
   Hard Drop, Ghost Piece, Don't Panic, Skip Celebrations, Korobeiniki, SRS
   Rotation and Randomizer. Opened with the Menu quick button, Select+Down, Android Back, Guide
   or a gamepad shortcut. The game pauses while it is open.
