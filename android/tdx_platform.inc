@@ -186,24 +186,23 @@ static void tdx_piece_colours(GBContext* ctx) {
     static const uint8_t obj7[8] = {0x00, 0x7C, 0xFF, 0x7F, 0xAD, 0x35, 0x00, 0x00};
     const bool play = memcmp(buf + 48, bg6, 8) == 0 && memcmp(buf + 112, obj7, 8) == 0 &&
                       memcmp(buf + 120, obj7, 8) == 0;
-    bool ours = which >= 0;
-    for (int i = 0; i < 128 && ours; ++i)
-        if (tdx_pc_range(i) && buf[i] != kTdxPieceColours[which][i]) ours = false;
+    /* Does the buffer hold one of our sets (Guideline or Sega)? If not, it
+     * holds the game's own colours, freshly loaded. */
+    bool any_ours = false;
+    for (int k = 0; k < 2 && !any_ours; ++k) {
+        any_ours = true;
+        for (int i = 0; i < 128 && any_ours; ++i)
+            if (tdx_pc_range(i) && buf[i] != kTdxPieceColours[k][i]) any_ours = false;
+    }
     if (which >= 0 && play) {
-        if (!g_tdx_pc_applied || !ours) {
+        if (!any_ours) {
             memcpy(g_tdx_pc_saved, buf, 128);   /* the game's own colours */
             g_tdx_pc_applied = true;
         }
-        tdx_pc_write(ctx, kTdxPieceColours[which]);
+        if (g_tdx_pc_applied) tdx_pc_write(ctx, kTdxPieceColours[which]);
         return;
     }
-    bool still = false;
-    for (int k = 0; k < 2 && !still; ++k) {
-        still = true;
-        for (int i = 0; i < 128 && still; ++i)
-            if (tdx_pc_range(i) && buf[i] != kTdxPieceColours[k][i]) still = false;
-    }
-    if (g_tdx_pc_applied && which < 0 && play && still) {
+    if (g_tdx_pc_applied && which < 0 && play && any_ours) {
         /* Another palette was chosen during play: put the game's colours back. */
         tdx_pc_write(ctx, g_tdx_pc_saved);
     }
