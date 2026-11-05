@@ -272,6 +272,7 @@ def patch_platform(proj, patch_table):
         "    tdx_check_menu_combo(g_manual_joypad_buttons, g_manual_joypad_dpad);\n",
         1, "select+down menu")
     text = lower_audio_latency(text)
+    text = half_volume(text)
     # The Palette option only recolours original Game Boy (DMG) games; Tetris DX
     # runs in Game Boy Color mode, where it is greyed out. Remove it.
     text = sub_exact(
@@ -280,6 +281,29 @@ def patch_platform(proj, patch_table):
         r"ImGui::TextDisabled\(\"Game Boy Color uses the game's color palettes\.\"\);\n        \}\n",
         "", 1, "remove palette option", flags=re.S)
     write(path, text)
+
+
+def half_volume(text):
+    """Tetroid DX plays at 50% of the runtime's volume (the GB audio is loud
+    on handheld speakers). There is no volume control in the Android menus, so
+    the saved audio.volume_percent from older builds (100) is ignored."""
+    text = replace_exact(text,
+        "static std::atomic<uint32_t> g_audio_volume_percent{100};",
+        "static std::atomic<uint32_t> g_audio_volume_percent{50};", 1, "volume init")
+    text = replace_exact(text,
+        "    g_audio_volume_percent.store(100, std::memory_order_relaxed);\n    g_audio_target_device_name.clear();",
+        "    g_audio_volume_percent.store(50, std::memory_order_relaxed);\n    g_audio_target_device_name.clear();",
+        1, "volume default")
+    text = replace_exact(text,
+        "                if (strcmp(key, \"audio.volume_percent\") == 0) {\n"
+        "                    long parsed = strtol(value, NULL, 10);\n"
+        "                    if (parsed >= 0) {\n",
+        "                if (strcmp(key, \"audio.volume_percent\") == 0) {\n"
+        "                    long parsed = 50;  /* Tetroid DX: fixed at 50% */\n"
+        "                    (void)value;\n"
+        "                    if (parsed >= 0) {\n",
+        1, "volume load")
+    return text
 
 
 def lower_audio_latency(text):
