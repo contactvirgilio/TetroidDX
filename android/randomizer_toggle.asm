@@ -2,7 +2,7 @@
 ;
 ;   0  Tetris DX's own randomizer (the original code runs unchanged)
 ;   1  7-bag: every run of 7 pieces holds each piece once
-;   2  35-Bag (TGM-style): modelled on the Tetris The Grand Master 3
+;   2  35-Bag: modelled on the Tetris The Grand Master 3
 ;      randomizer. The 35-piece pool (5 of each) and putting the longest-unseen
 ;      piece back after each draw follow tetris.wiki / Hard Drop wiki; the
 ;      4-piece history (starting S Z S Z), up to 6 rolls and the I/T/J/L first

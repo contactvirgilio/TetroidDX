@@ -128,12 +128,33 @@ draw_ghost_tetromino::
         ld      [$c013+$08], a
         ld      [$c013+$0c], a
 .set_ghost_tile
-        ld      a, [OPTIONS]
-        bit     OPT_GHOST_DARK, a
-        ret     nz
-        ld      a, GHOST_TILE
+        call    ghost_tile      ; a = tile to use, or Z set: keep the piece's own
+        ret     z
         ld      [$c012+$00], a
         ld      [$c012+$04], a
         ld      [$c012+$08], a
         ld      [$c012+$0c], a
+        ret
+
+; Tetroid DX: tile choice for the ghost, in free space in bank 0.
+; Light ghost: the outline tile. Dark ghost: the piece's own tiles in the grey
+; palette, except the O piece, whose tile is mostly the palette's white and
+; looked light; it uses the T piece's block tile ($98) instead.
+SECTION "ghost_tile", ROM0[$3900]
+ghost_tile::
+        ld      a, [OPTIONS]
+        bit     OPT_GHOST_DARK, a
+        jr      nz, .dark
+        ld      a, GHOST_TILE
+        and     a               ; NZ: use this tile
+        ret
+.dark
+        ld      a, [$af85]      ; current piece
+        cp      6               ; O
+        jr      z, .o
+        xor     a               ; Z: keep the piece's own tiles
+        ret
+.o
+        ld      a, $98
+        and     a
         ret

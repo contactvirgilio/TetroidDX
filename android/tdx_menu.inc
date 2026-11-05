@@ -159,7 +159,7 @@ static std::string tdx_sc_label(int i) {
 
 static void tdx_fire_shortcut(int i) {
     static const char* const ghost[3] = {"Off", "Light", "Dark"};
-    static const char* const pal[TDX_PAL_COUNT] = {"Original", "GBC LCD", "Pastel", "Swamp", "Sunset"};
+    static const char* const pal[TDX_PAL_COUNT] = {"Original", "GBC LCD", "Pastel", "Swamp", "Sunset", "Guideline", "Sega"};
     switch (i) {
         case 0:
             g_tdx_menu_page = TDX_PAGE_MAIN;
@@ -281,7 +281,7 @@ Java_org_tetrisdx_recomp_TouchControls_nativeRequest(JNIEnv* env, jclass cls, ji
 
 static const char* const kTdxGhostNames[3] = {"Off", "Light", "Dark"};
 static const char* const kTdxPaletteNames[TDX_PAL_COUNT] = {
-    "Original", "GBC LCD", "Pastel", "Swamp", "Sunset"};
+    "Original", "GBC LCD", "Pastel", "Swamp", "Sunset", "Guideline", "Sega"};
 static const GBInputAction kTdxControlActions[8] = {
     GB_INPUT_ACTION_UP, GB_INPUT_ACTION_DOWN, GB_INPUT_ACTION_LEFT, GB_INPUT_ACTION_RIGHT,
     GB_INPUT_ACTION_A, GB_INPUT_ACTION_B, GB_INPUT_ACTION_SELECT, GB_INPUT_ACTION_START};
@@ -472,7 +472,8 @@ static void tdx_draw_menu(void) {
             "Skip Celebrations: llakssz",
             "Korobeiniki (Music Fix): Marc Robledo",
             "SRS: rotation data from tetris.wiki",
-            "35-Bag (TGM-style): after the TGM3 randomizer",
+            "35-Bag: after the TGM3 randomizer",
+            "Guideline & Sega palettes: CreeperCraftYT",
             "Recompiler: GB Recompiled by arcanite24 (MIT)",
             "SDL2 (zlib), Dear ImGui (MIT), RGBDS",
             "Font: BPreplay (SIL Open Font License)",

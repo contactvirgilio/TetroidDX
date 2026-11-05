@@ -2,10 +2,11 @@
 ;
 ; Based on "Tetris DX - Music Fix" by Marc Robledo (2020), which makes Music
 ; Type A play the classic Korobeiniki song (song $64) and changes the two
-; "close to game over" songs to $64 and $4B. Here both changes go through
-; small routines that pick the original or Marc's songs from bit 5 of the
-; OPTIONS byte that the app sets from its menu. With the bit clear the game
-; behaves like the original.
+; "close to game over" songs to $64 and $4B. Tetroid DX keeps the game's own
+; first danger song ($5E) so both danger stages are heard, and uses $4B for
+; the second. Small routines pick the original or these songs from bit 5 of
+; the OPTIONS byte that the app sets from its menu. With the bit clear the
+; game behaves like the original.
 ;
 ; The OPTIONS byte is read through $7FFF of the ROM bank mapped at the time:
 ; bank 1 for the danger songs, bank 5 for the music choice. The app writes
@@ -36,14 +37,15 @@ koro_danger::
         bit     OPT_CLASSIC, a
         jr      nz, .classic
         pop     af
-        ld      a, $5f
+        ld      a, $5f          ; original second danger song
         ld      [$ac54], a
         ret
 .classic
-        ld      a, $64
-        ld      [$ac53], a
+        ; The first danger song stays the game's own ($5E, already stored at
+        ; $4C2D). Marc's patch also set it to $64, the same song as Music
+        ; Type A, so the first danger stage never sounded different.
         pop     af
-        ld      a, $4b
+        ld      a, $4b          ; second danger song from Marc's patch
         ld      [$ac54], a
         ret
 

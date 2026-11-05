@@ -52,7 +52,7 @@ public class GameActivity extends SDLActivity {
 
     /**
      * Same as the DKC ports: with All files access, the save and settings live
-     * in a TetroidDX folder in the phone's main storage. The folder is created
+     * in a TetroidDX folder in the device's main storage. The folder is created
      * here, and anything saved inside the app before is copied in once (the
      * ROM itself stays private). Without access, it is asked for once
      * (Android 11+) and the game keeps saving inside the app meanwhile.
@@ -120,7 +120,7 @@ public class GameActivity extends SDLActivity {
 
     /**
      * SDL locks the orientation for a fullscreen window. Always follow the
-     * device instead, so it works on phones (either way up) and on the
+     * device instead, so it works on handheld devices (either way up) and on the
      * Retroid Pocket Classic's portrait screen.
      */
     @Override

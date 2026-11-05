@@ -120,9 +120,95 @@ static void tdx_copy_row_corrected(uint32_t* dst, const uint32_t* src, int count
  *   4 Sunset    - violet-to-cream gradient chosen by brightness
  * Only how the frame is drawn changes; the game itself is untouched. */
 enum { TDX_PAL_ORIGINAL = 0, TDX_PAL_GBC_LCD = 1, TDX_PAL_PASTEL = 2, TDX_PAL_SWAMP = 3,
-       TDX_PAL_SUNSET = 4, TDX_PAL_COUNT = 5 };
+       TDX_PAL_SUNSET = 4, TDX_PAL_GUIDELINE = 5, TDX_PAL_SEGA = 6, TDX_PAL_COUNT = 7 };
 static int g_tdx_palette = TDX_PAL_GBC_LCD;
-static uint32_t* g_tdx_pal_lut[TDX_PAL_COUNT] = {NULL, NULL, NULL, NULL, NULL};
+static uint32_t* g_tdx_pal_lut[TDX_PAL_COUNT] = {};
+
+/* Guideline and Sega piece colours by CreeperCraftYT: the game's own colour
+ * palettes during play (work RAM $C280-$C2FF, 8 background then 8 sprite
+ * palettes, copied to the screen by the game). These cannot be a screen
+ * filter like the other palettes: the game uses the same orange for the Z
+ * piece and for the L/O shading, so a colour-for-colour swap cannot tell them
+ * apart. While one is chosen, only the piece colour slots (background 0-3,
+ * sprite 0-5) are replaced whenever the rest of the palette RAM shows the
+ * play screen, and the game's own values are put back when another palette
+ * is chosen. Drawn with the GBC LCD colour correction. */
+static const uint8_t kTdxPieceColours[2][128] = {
+  { /* Guideline */
+    0x1F, 0x02, 0xFF, 0x03, 0xFF, 0x06, 0x00, 0x00, 0x00, 0x75, 0xFF, 0x7F, 0x19, 0x58, 0x00, 0x00,
+    0xE4, 0x13, 0xFF, 0x7F, 0x1F, 0x00, 0x00, 0x00, 0xE0, 0x5D, 0x77, 0x7F, 0xE0, 0x7F, 0x00, 0x00,
+    0xA0, 0x00, 0xFF, 0x7F, 0x85, 0x3E, 0x42, 0x09, 0xC2, 0x21, 0x77, 0x7F, 0xE1, 0x21, 0xA0, 0x00,
+    0x43, 0x45, 0xFF, 0x7F, 0x49, 0x6A, 0x00, 0x00, 0xA0, 0x7E, 0xBF, 0x03, 0xFF, 0x7F, 0x00, 0x00,
+    0x00, 0x7C, 0xFF, 0x03, 0x1F, 0x00, 0x00, 0x00, 0x00, 0x7C, 0xFF, 0x7F, 0x40, 0x7D, 0x00, 0x00,
+    0x00, 0x7C, 0xFF, 0x7F, 0x19, 0x58, 0x00, 0x00, 0x00, 0x7C, 0xFF, 0x7F, 0xE0, 0x7F, 0x00, 0x00,
+    0x00, 0x7C, 0xFF, 0x03, 0x1F, 0x02, 0x00, 0x00, 0x00, 0x7C, 0xFF, 0x7F, 0xE4, 0x13, 0x00, 0x00,
+    0x00, 0x7C, 0xFF, 0x7F, 0xAD, 0x35, 0x00, 0x00, 0x00, 0x7C, 0xFF, 0x7F, 0xAD, 0x35, 0x00, 0x00,
+  },
+  { /* Sega */
+    0x1F, 0x02, 0xFF, 0x03, 0xFF, 0x06, 0x00, 0x00, 0x00, 0x75, 0xFF, 0x7F, 0xE0, 0x7F, 0x00, 0x00,
+    0x19, 0x58, 0xFF, 0x7F, 0xE0, 0x03, 0x00, 0x00, 0x10, 0x00, 0x77, 0x7F, 0x1F, 0x00, 0x00, 0x00,
+    0xA0, 0x00, 0xFF, 0x7F, 0x85, 0x3E, 0x42, 0x09, 0xC2, 0x21, 0x77, 0x7F, 0xE1, 0x21, 0xA0, 0x00,
+    0x43, 0x45, 0xFF, 0x7F, 0x49, 0x6A, 0x00, 0x00, 0xA0, 0x7E, 0xBF, 0x03, 0xFF, 0x7F, 0x00, 0x00,
+    0x00, 0x7C, 0xFF, 0x03, 0xE0, 0x03, 0x00, 0x00, 0x00, 0x7C, 0xFF, 0x7F, 0x40, 0x7D, 0x00, 0x00,
+    0x00, 0x7C, 0xFF, 0x7F, 0xE0, 0x7F, 0x00, 0x00, 0x00, 0x7C, 0xFF, 0x7F, 0x1F, 0x00, 0x00, 0x00,
+    0x00, 0x7C, 0xFF, 0x03, 0x1F, 0x02, 0x00, 0x00, 0x00, 0x7C, 0xFF, 0x7F, 0x19, 0x58, 0x00, 0x00,
+    0x00, 0x7C, 0xFF, 0x7F, 0xAD, 0x35, 0x00, 0x00, 0x00, 0x7C, 0xFF, 0x7F, 0xAD, 0x35, 0x00, 0x00,
+  },
+};
+static uint8_t g_tdx_pc_saved[128];
+static bool g_tdx_pc_applied = false;
+
+static bool tdx_pc_range(int i) { return i < 32 || (i >= 64 && i < 112); }
+
+/* Writes only the piece colour slots (background palettes 0-3, sprite
+ * palettes 0-5) to the game's palette buffer and the screen's palette RAM.
+ * Everything else, such as the background colour that the game changes per
+ * level and writes straight to the hardware, is left alone. */
+static void tdx_pc_write(GBContext* ctx, const uint8_t* src) {
+    uint8_t* buf = ctx->wram + 0x280;
+    GBPPU* ppu = (GBPPU*)ctx->ppu;
+    for (int i = 0; i < 128; ++i) {
+        if (!tdx_pc_range(i)) continue;
+        buf[i] = src[i];
+        if (ppu) {
+            if (i < 64) ppu->bg_palette_ram[i] = src[i];
+            else ppu->obj_palette_ram[i - 64] = src[i];
+        }
+    }
+}
+
+static void tdx_piece_colours(GBContext* ctx) {
+    if (!ctx || !ctx->wram) return;
+    uint8_t* buf = ctx->wram + 0x280;
+    const int which = g_tdx_palette == TDX_PAL_GUIDELINE ? 0 : (g_tdx_palette == TDX_PAL_SEGA ? 1 : -1);
+    /* Play screen: background palette 6 and sprite palettes 14-15 as below. */
+    static const uint8_t bg6[8] = {0x43, 0x45, 0xFF, 0x7F, 0x49, 0x6A, 0x00, 0x00};
+    static const uint8_t obj7[8] = {0x00, 0x7C, 0xFF, 0x7F, 0xAD, 0x35, 0x00, 0x00};
+    const bool play = memcmp(buf + 48, bg6, 8) == 0 && memcmp(buf + 112, obj7, 8) == 0 &&
+                      memcmp(buf + 120, obj7, 8) == 0;
+    bool ours = which >= 0;
+    for (int i = 0; i < 128 && ours; ++i)
+        if (tdx_pc_range(i) && buf[i] != kTdxPieceColours[which][i]) ours = false;
+    if (which >= 0 && play) {
+        if (!g_tdx_pc_applied || !ours) {
+            memcpy(g_tdx_pc_saved, buf, 128);   /* the game's own colours */
+            g_tdx_pc_applied = true;
+        }
+        tdx_pc_write(ctx, kTdxPieceColours[which]);
+        return;
+    }
+    bool still = false;
+    for (int k = 0; k < 2 && !still; ++k) {
+        still = true;
+        for (int i = 0; i < 128 && still; ++i)
+            if (tdx_pc_range(i) && buf[i] != kTdxPieceColours[k][i]) still = false;
+    }
+    if (g_tdx_pc_applied && which < 0 && play && still) {
+        /* Another palette was chosen during play: put the game's colours back. */
+        tdx_pc_write(ctx, g_tdx_pc_saved);
+    }
+    g_tdx_pc_applied = false;
+}
 
 static uint32_t tdx_mix(uint32_t a, uint32_t b, double t) {
     const int ar = (a >> 16) & 255, ag = (a >> 8) & 255, ab = a & 255;
@@ -197,7 +283,7 @@ static uint32_t tdx_pastel(double r, double g, double b) {
 }
 
 static void tdx_build_palette_lut(int mode) {
-    if (mode < TDX_PAL_PASTEL || mode >= TDX_PAL_COUNT || g_tdx_pal_lut[mode]) {
+    if (mode < TDX_PAL_PASTEL || mode > TDX_PAL_SUNSET || g_tdx_pal_lut[mode]) {
         return;
     }
     uint32_t* lut = (uint32_t*)malloc(sizeof(uint32_t) * 32768u);
@@ -224,11 +310,12 @@ static void tdx_build_palette_lut(int mode) {
 
 /* Copies one screen row using the selected palette. */
 static void tdx_copy_row(uint32_t* dst, const uint32_t* src, int count) {
-    if (g_tdx_palette == TDX_PAL_GBC_LCD) {
+    if (g_tdx_palette == TDX_PAL_GBC_LCD || g_tdx_palette == TDX_PAL_GUIDELINE ||
+        g_tdx_palette == TDX_PAL_SEGA) {
         tdx_copy_row_corrected(dst, src, count);
         return;
     }
-    if (g_tdx_palette >= TDX_PAL_PASTEL && g_tdx_palette < TDX_PAL_COUNT) {
+    if (g_tdx_palette >= TDX_PAL_PASTEL && g_tdx_palette <= TDX_PAL_SUNSET) {
         tdx_build_palette_lut(g_tdx_palette);
         const uint32_t* lut = g_tdx_pal_lut[g_tdx_palette];
         if (lut) {

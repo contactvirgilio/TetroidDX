@@ -231,7 +231,7 @@ def patch_platform(proj, patch_table):
     text = replace_exact(
         text,
         "    tdx_sync_options(g_registered_ctx);\n",
-        "    tdx_sync_options(g_registered_ctx);\n    tdx_process_requests();\n",
+        "    tdx_sync_options(g_registered_ctx);\n    tdx_piece_colours(g_registered_ctx);\n    tdx_process_requests();\n",
         1, "menu requests")
     # Gamepad shortcuts see every controller button before the game does.
     text = replace_exact(
@@ -247,7 +247,7 @@ def patch_platform(proj, patch_table):
         "    }\n",
         1, "gamepad shortcuts")
     # Settings go next to the save: in the --save-dir folder when one is given
-    # (Tetroid DX passes the TetroidDX folder in phone storage).
+    # (Tetroid DX passes the TetroidDX folder in the device's main storage).
     text = replace_exact(
         text,
         "static std::string runtime_preferences_path(void) {\n",
@@ -284,7 +284,7 @@ def patch_platform(proj, patch_table):
 
 def lower_audio_latency(text):
     """Upstream uses a 2048-sample SDL buffer (~46 ms) plus an 80 ms queue,
-    which is audibly late on phones. Use 512 samples (~12 ms) on Android and a
+    which is audibly late on Android devices. Use 512 samples (~12 ms) on Android and a
     40 ms queue. The Audio menu's latency slider can still raise it."""
     text = replace_exact(
         text, "    want.samples = 2048;\n",
@@ -401,7 +401,7 @@ MENU_BLOCK = r"""        ImGui::TextDisabled("Tetroid DX");
             save_runtime_preferences();
         }
         {
-            static const char* tdx_palette_names[] = {"Original", "GBC LCD", "Pastel", "Swamp", "Sunset"};
+            static const char* tdx_palette_names[] = {"Original", "GBC LCD", "Pastel", "Swamp", "Sunset", "Guideline", "Sega"};
             if (ImGui::Combo("Palette", &g_tdx_palette, tdx_palette_names, TDX_PAL_COUNT)) {
                 save_runtime_preferences();
             }
@@ -469,7 +469,7 @@ MANIFEST = """<?xml version="1.0" encoding="utf-8"?>
     <uses-feature android:name="android.hardware.gamepad" android:required="false" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- Optional "All files access": keeps the save in a TetroidDX folder in the
-         phone's main storage and finds a ROM placed there (as in the DKC ports). -->
+         device's main storage and finds a ROM placed there (as in the DKC ports). -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
 
     <application

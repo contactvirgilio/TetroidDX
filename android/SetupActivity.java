@@ -34,7 +34,7 @@ public class SetupActivity extends Activity {
     /** SHA-256 of the ROM the code was generated from. Filled in by the build. */
     static final String EXPECTED_SHA256 = "@ROM_SHA256@";
 
-    /** Folder in the phone's main storage for the save, settings and a ROM to pick up. */
+    /** Folder in the device's main storage for the save, settings and a ROM to pick up. */
     static final String FOLDER = "TetroidDX";
 
     private static final int PICK_ROM = 1;
@@ -126,7 +126,8 @@ public class SetupActivity extends Activity {
             return;
         }
 
-        // Black screen, BPreplay font everywhere, outlined "Choose ROM" pill,
+        // Black screen, BPreplay title and button, body text in the system
+        // sans-serif used by the in-game cards, outlined "Choose ROM" pill,
         // errors shown in red on the screen (never Android toasts).
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -154,9 +155,9 @@ public class SetupActivity extends Activity {
                 + "Tetris DX (World) (SGB Enhanced), the .gbc file. It is checked and kept "
                 + "inside the app.\n\n"
                 + "Tip: with All files access turned on, a ROM placed in the " + FOLDER
-                + " folder of your phone storage is found automatically.\n");
+                + " folder of your device's main storage is found automatically.\n");
         body.setTextColor(0xFFBDBDBD);
-        body.setTypeface(face);
+        body.setTypeface(Typeface.DEFAULT);
         body.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         body.setGravity(Gravity.CENTER);
         root.addView(body);
@@ -185,7 +186,7 @@ public class SetupActivity extends Activity {
         root.addView(pick, lp);
 
         status = new TextView(this);
-        status.setTypeface(face);
+        status.setTypeface(Typeface.DEFAULT);
         status.setTextColor(0xFFFF8A80);
         status.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         status.setGravity(Gravity.CENTER);

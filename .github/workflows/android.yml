@@ -104,6 +104,8 @@ jobs:
           # $3A00-$3BFF, mode byte at bank 0 $3FFF.
           if rom[0x58BC:0x58C2] != bytes.fromhex("FA83AF3CFE07") or rom[0x58E8:0x58EB] != bytes.fromhex("EA84AF"):
               sys.exit("Randomizer: unexpected code at bank 1 $58BC")
+          if any(rom[0x3900:0x3920]):
+              sys.exit("Ghost: bank 0 $3900 is not free")
           if any(rom[0x3A00:0x3C00]):
               sys.exit("Randomizer: bank 0 $3A00-$3BFF is not free")
           print("Randomizer site check OK")

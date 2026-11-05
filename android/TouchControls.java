@@ -61,8 +61,8 @@ public class TouchControls extends View {
     private static final int WINE_LABEL = 0xFFF2DCE4;
 
     private static final String[] GHOST_NAMES = {"Off", "Light", "Dark"};
-    private static final String[] RAND_NAMES = {"Tetris DX", "7-Bag", "35-Bag (TGM-style)"};
-    private static final String[] PALETTE_NAMES = {"Original", "GBC LCD", "Pastel", "Swamp", "Sunset"};
+    private static final String[] RAND_NAMES = {"Tetris DX", "7-Bag", "35-Bag"};
+    private static final String[] PALETTE_NAMES = {"Original", "GBC LCD", "Pastel", "Swamp", "Sunset", "Guideline", "Sega"};
 
     private final boolean[] pressed = new boolean[COUNT];
     private final Paint stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
