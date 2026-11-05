@@ -17,14 +17,17 @@ the game runs its original code):
 - **Ghost Piece:** Off, Light or Dark.
 - **Don't Panic:** removes the game's danger reaction when the stack gets high.
 - **Skip Celebrations:** skips the end-of-game celebration scenes.
-- **Korobeiniki:** Music Type A plays the classic Tetris theme.
+- **Korobeiniki:** Music Type A plays the classic Tetris theme (both danger
+  stages still change the music).
 - **SRS Rotation:** Super Rotation System spawn orientation, wall kicks and
   next-piece preview.
-- **Randomizer:** Tetris DX (original), 7-Bag, or 35-Bag (TGM-style).
+- **Randomizer:** Tetris DX (original), 7-Bag or 35-Bag. The bag takes over
+  from the second piece of each game.
 
 **Display:**
 - **Palettes:** Original, GBC LCD (colour corrected to look like the real Game
-  Boy Color screen, default), Pastel, Swamp and Sunset.
+  Boy Color screen, default), Pastel, Swamp, Sunset, and Guideline and Sega
+  piece colours by CreeperCraftYT.
 - **Scanlines.**
 - Portrait and landscape; in portrait the game sits at the top with the
   controls below.
@@ -41,11 +44,11 @@ the game runs its original code):
   Ghost Piece, Cycle Palette; set them on the Controls page.
 - Touch A and B light up in the original Game Boy's wine red when pressed.
 - Controller button remapping from the Controls page.
-- Low-latency audio tuned for phones.
+- Low-latency audio tuned for Android devices.
 - The cartridge's own battery save (high scores) works. Save states are
   deliberately not included.
 - With All files access (asked once, Android 11+), the save and settings are
-  kept in a TetroidDX folder in your phone storage, and a ROM placed there is
+  kept in a TetroidDX folder in your device's main storage, and a ROM placed there is
   found automatically.
 
 ## How the toggles work
