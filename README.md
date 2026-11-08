@@ -24,7 +24,6 @@ its original code.
 - **Palettes**: Original, GBC LCD, Swamp, Guideline, Sega, Amber Night
 - Scanlines and Mute
 
-No save states, no widescreen.
 
 ## Controls
 - Touch: on-screen buttons, with quick buttons on top (Mute, Palette, Scanlines, Menu).
