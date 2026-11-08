@@ -25,6 +25,13 @@ its original code.
 - Scanlines and Mute
 
 
+## Screenshots
+<p>
+<img src="screenshots/amber-night-preview.png" width="31%" alt="Amber Night palette with the preview queue and Hold">
+<img src="screenshots/layout-queue-and-hold.png" width="31%" alt="Preview queue and Hold layout">
+<img src="screenshots/in-game-box-4x3.png" width="31%" alt="In game box for 4:3 screens">
+</p>
+
 ## Controls
 - Touch: on-screen buttons, with quick buttons on top (Mute, Palette, Scanlines, Menu).
 - Controller: the touch game buttons hide; D-pad or left stick moves in the
