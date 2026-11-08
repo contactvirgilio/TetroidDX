@@ -58,7 +58,7 @@ jobs:
           cmake -S rgbds -B rgbds/build -G Ninja -DCMAKE_BUILD_TYPE=Release
           ninja -C rgbds/build rgbasm rgblink rgbfix
 
-      - name: Apply hard drop, ghost piece, Don't Panic, Skip Celebrations, Korobeiniki, SRS and Randomizer patches
+      - name: Apply hard drop, ghost piece, Don't Panic, Skip Celebrations, Korobeiniki, SRS, Randomizer and Lock Delay patches
         run: |
           python3 - <<'EOF'
           import os, sys
@@ -88,6 +88,8 @@ jobs:
               sys.exit("Korobeiniki: unexpected code at bank 5 $4D10")
           if any(rom[0x3FC1:0x4000]) or any(rom[0x17FEB:0x18000]):
               sys.exit("Korobeiniki: bank 0 $3FC1-$3FFF or bank 5 $7FEB-$7FFF is not free")
+          if rom[0x316D1:0x316D7] != bytes.fromhex("555A0C960001") or any(rom[0x48000:0x4C000]):
+              sys.exit("Korobeiniki Plus: song $66 slot is not as expected or bank $12 is not empty")
           print("Korobeiniki site check OK")
           # SRS: hooks at bank 1 $57C5, $581E, $591E; code at bank 1 $7EE0-$7F49
           # and bank 0 $3C00-$3EFF; preview tables at bank 1 $4B75/$4B84.
@@ -106,9 +108,16 @@ jobs:
               sys.exit("Randomizer: unexpected code at bank 1 $58BC")
           if any(rom[0x3900:0x3920]):
               sys.exit("Ghost: bank 0 $3900 is not free")
-          if any(rom[0x3A00:0x3C00]):
-              sys.exit("Randomizer: bank 0 $3A00-$3BFF is not free")
+          if any(rom[0x3A00:0x3C00]) or any(rom[0x3FFE:0x4000]):
+              sys.exit("Randomizer: bank 0 $3A00-$3BFF or $3FFE-$3FFF is not free")
           print("Randomizer site check OK")
+          # Lock delay: hooks at bank 1 $5607, $565A, $578E; code at bank 0 $3800.
+          if (rom[0x5607:0x560B] != bytes.fromhex("FA57AC47") or rom[0x565A:0x565D] != bytes.fromhex("2181AF")
+                  or rom[0x578E:0x5792] != bytes.fromhex("2181AF35")):
+              sys.exit("Lock delay: unexpected code at a hook site")
+          if any(rom[0x3800:0x3900]):
+              sys.exit("Lock delay: bank 0 $3800-$38FF is not free")
+          print("Lock delay site check OK")
           EOF
           mkdir -p work
           python3 android/prepare_dontpanic.py "$ROM_PATH" work/dontpanic_orig.inc
@@ -120,7 +129,8 @@ jobs:
           "$R/rgbasm" -E android/korobeiniki_toggle.asm -o work/korobeiniki.o
           "$R/rgbasm" -E android/srs_toggle.asm -o work/srs.o
           "$R/rgbasm" -E android/randomizer_toggle.asm -o work/randomizer.o
-          "$R/rgblink" -O "$ROM_PATH" -o work/patched.gbc work/harddrop.o work/dontpanic.o work/skipceleb.o work/korobeiniki.o work/srs.o work/randomizer.o
+          "$R/rgbasm" -E android/lockdelay_toggle.asm -o work/lockdelay.o
+          "$R/rgblink" -O "$ROM_PATH" -o work/patched.gbc work/harddrop.o work/dontpanic.o work/skipceleb.o work/korobeiniki.o work/srs.o work/randomizer.o work/lockdelay.o
           cmp -l "$ROM_PATH" work/patched.gbc | wc -l
 
       - name: Build the recompiler
@@ -192,7 +202,11 @@ jobs:
             echo "Using NDK $TDX_NDK_VERSION"
           fi
           export SDL2_SOURCE_DIR="$PWD/SDL"
-          curl -sSL https://services.gradle.org/distributions/gradle-8.9-bin.zip -o /tmp/gradle.zip
+          for i in 1 2 3 4; do
+            curl -fsSL --retry 3 https://services.gradle.org/distributions/gradle-8.9-bin.zip -o /tmp/gradle.zip \
+              && unzip -tq /tmp/gradle.zip > /dev/null && break
+            echo "Gradle download failed (try $i), retrying"; sleep 10
+          done
           unzip -q /tmp/gradle.zip -d /opt
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
           set -o pipefail

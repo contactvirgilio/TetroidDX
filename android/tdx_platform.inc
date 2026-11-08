@@ -8,11 +8,6 @@
  * (including colour correction) is below, saved as display.palette. */
 static bool g_tdx_scanlines = false;
 
-/* Gamepad shortcuts (defined in tdx_menu.inc); declared here because the
- * runtime's settings load/save, earlier in the file, store them. */
-enum { TDX_SC_COUNT = 4 };
-static void tdx_sc_parse(int i, const char* value);
-static std::string tdx_sc_value(int i);
 static uint32_t* g_tdx_cc_lut = NULL;
 
 /* Hard drop and ghost piece (see android/harddrop_toggle.asm, based on
@@ -25,17 +20,20 @@ static bool g_tdx_harddrop = false;
 static bool g_tdx_dontpanic = false;
 /* Skip Celebrations by llakssz (romhacking.net #4734), see skipceleb_toggle.asm.
  * Saved as tdx.skipceleb. */
-static bool g_tdx_skipceleb = false;
+static int g_tdx_skipceleb = 0;           /* 0 off, 1 always, 2 Start skips */
 /* Korobeiniki: Music Type A plays the classic Tetris song, based on
  * "Tetris DX - Music Fix" by Marc Robledo, see korobeiniki_toggle.asm.
  * Saved as tdx.korobeiniki. */
-static bool g_tdx_korobeiniki = false;
+static int g_tdx_korobeiniki = 0;   /* 0 Off, 1 Original, 2 Plus (own first panic song) */
 /* Super Rotation System (see srs_toggle.asm). Saved as tdx.srs. */
 static bool g_tdx_srs = false;
+/* Lock delay (see lockdelay_toggle.asm). Saved as tdx.lock. */
+static bool g_tdx_lockdelay = false;
 /* Randomizer (see randomizer_toggle.asm): 0 Tetris DX, 1 7-bag, 2 35-bag.
  * Written to bank 0 $3FFF. Saved as tdx.rand. */
 static int g_tdx_randomizer = 0;
 #define TDX_RANDOMIZER_OFFSET 0x3FFFu
+#define TDX_KORO_PLUS_OFFSET 0x3FFDu   /* bank 0: 1 = Korobeiniki (Plus) */
 static int g_tdx_ghost = 0;
 #define TDX_OPTIONS_OFFSET 0x7FFFu
 #define TDX_OPTIONS_OFFSET_B5 0x17FFFu   /* bank-5 copy, read by the music hook */
@@ -46,9 +44,10 @@ static uint8_t tdx_options_byte(void) {
     if (g_tdx_ghost == 1) v |= 0x02;
     if (g_tdx_ghost == 2) v |= 0x06;
     if (g_tdx_dontpanic) v |= 0x08;
-    if (g_tdx_skipceleb) v |= 0x10;
+    if (g_tdx_skipceleb == 1) v |= 0x10;
     if (g_tdx_korobeiniki) v |= 0x20;
     if (g_tdx_srs) v |= 0x40;
+    if (g_tdx_lockdelay) v |= 0x80;
     return v;
 }
 
@@ -62,6 +61,7 @@ static void tdx_sync_options(GBContext* ctx) {
     }
     if (ctx && ctx->rom && ctx->rom_size > TDX_RANDOMIZER_OFFSET) {
         ctx->rom[TDX_RANDOMIZER_OFFSET] = (uint8_t)g_tdx_randomizer;
+        ctx->rom[TDX_KORO_PLUS_OFFSET] = (g_tdx_korobeiniki == 2) ? 1 : 0;
     }
 }
 
@@ -118,9 +118,11 @@ static void tdx_copy_row_corrected(uint32_t* dst, const uint32_t* src, int count
  *   2 Pastel    - colourful pixels lightened and softened (darks kept)
  *   3 Swamp     - deep-green-to-moss gradient chosen by brightness
  *   4 Sunset    - violet-to-cream gradient chosen by brightness
+ *   7 Amber Night - black-to-amber gradient, no blue light (night sessions)
+ *   8 Graphite   - black-to-dim-grey only (night sessions)
  * Only how the frame is drawn changes; the game itself is untouched. */
 enum { TDX_PAL_ORIGINAL = 0, TDX_PAL_GBC_LCD = 1, TDX_PAL_PASTEL = 2, TDX_PAL_SWAMP = 3,
-       TDX_PAL_SUNSET = 4, TDX_PAL_GUIDELINE = 5, TDX_PAL_SEGA = 6, TDX_PAL_COUNT = 7 };
+       TDX_PAL_SUNSET = 4, TDX_PAL_GUIDELINE = 5, TDX_PAL_SEGA = 6, TDX_PAL_AMBER = 7, TDX_PAL_GRAPHITE = 8, TDX_PAL_COUNT = 9 };
 static int g_tdx_palette = TDX_PAL_GBC_LCD;
 static uint32_t* g_tdx_pal_lut[TDX_PAL_COUNT] = {};
 
@@ -282,7 +284,8 @@ static uint32_t tdx_pastel(double r, double g, double b) {
 }
 
 static void tdx_build_palette_lut(int mode) {
-    if (mode < TDX_PAL_PASTEL || mode > TDX_PAL_SUNSET || g_tdx_pal_lut[mode]) {
+    if (mode < TDX_PAL_PASTEL || mode >= TDX_PAL_COUNT || mode == TDX_PAL_GUIDELINE ||
+        mode == TDX_PAL_SEGA || g_tdx_pal_lut[mode]) {
         return;
     }
     uint32_t* lut = (uint32_t*)malloc(sizeof(uint32_t) * 32768u);
@@ -293,6 +296,10 @@ static void tdx_build_palette_lut(int mode) {
     static const uint32_t swamp[4] = {0x0C1A0E, 0x2D5A2B, 0x7FA34C, 0xDCE9B5};
     /* Sunset: deep violet, magenta, coral, warm cream. */
     static const uint32_t sunset[4] = {0x24103F, 0x8E2C6E, 0xF0715A, 0xFFE9C4};
+    static const uint32_t amber[4] = {0x080400, 0x3A1C00, 0x9A5600, 0xE2A24C};
+    static const uint32_t graphite[4] = {0x040404, 0x1C1C1C, 0x4C4C4C, 0x9A9A9A};
+    const uint32_t* stops = mode == TDX_PAL_SWAMP ? swamp : (mode == TDX_PAL_AMBER ? amber :
+                            (mode == TDX_PAL_GRAPHITE ? graphite : sunset));
     for (uint32_t i = 0; i < 32768u; ++i) {
         const double r = (double)(i & 31u) / 31.0;
         const double g = (double)((i >> 5) & 31u) / 31.0;
@@ -301,7 +308,7 @@ static void tdx_build_palette_lut(int mode) {
         if (mode == TDX_PAL_PASTEL) {
             lut[i] = tdx_pastel(r, g, b);
         } else {
-            lut[i] = tdx_gradient(mode == TDX_PAL_SWAMP ? swamp : sunset, lum);
+            lut[i] = tdx_gradient(stops, lum);
         }
     }
     g_tdx_pal_lut[mode] = lut;
@@ -314,7 +321,8 @@ static void tdx_copy_row(uint32_t* dst, const uint32_t* src, int count) {
         tdx_copy_row_corrected(dst, src, count);
         return;
     }
-    if (g_tdx_palette >= TDX_PAL_PASTEL && g_tdx_palette <= TDX_PAL_SUNSET) {
+    if (g_tdx_palette >= TDX_PAL_PASTEL && g_tdx_palette != TDX_PAL_GUIDELINE &&
+        g_tdx_palette != TDX_PAL_SEGA && g_tdx_palette < TDX_PAL_COUNT) {
         tdx_build_palette_lut(g_tdx_palette);
         const uint32_t* lut = g_tdx_pal_lut[g_tdx_palette];
         if (lut) {
@@ -476,4 +484,315 @@ Java_org_tetrisdx_recomp_TouchControls_nativeHardDropOn(JNIEnv* env, jclass cls)
     return g_tdx_harddrop ? JNI_TRUE : JNI_FALSE;
 }
 #endif
+
+/* ===================== Randomizer queue and Hold (Tetroid DX) =====================
+ *
+ * Randomizer: with 7-Bag or 35-Bag the pieces are chosen here, so the app can
+ * show several upcoming pieces. The game's hook (randomizer_toggle.asm) counts
+ * each piece it takes in WRAM $CF80 and reads the piece from bank 0 $3FFE,
+ * which this code keeps set to the head of the queue. Tetris DX mode runs the
+ * game's own code; then only the game's next piece is known.
+ *
+ * Hold: while Hold is on, the touch HOLD button (above Select and Start) and
+ * L1 / R1 on a controller hold the piece; Select keeps its normal use. The swap is done
+ * between frames, only while a piece is falling (game state $AC0F = 3):
+ *   - empty hold box: the piece goes in the box and the game is sent to its
+ *     "spawn the next piece" state ($AC0F = 5, no lines), so the queue moves on;
+ *   - otherwise the held piece replaces the falling one at the spawn position,
+ *     if it fits there.
+ * Once per piece, as in modern Tetris. Game RAM: $AF80 X, $AF81 Y, $AF82
+ * rotation, $AF84 next, $AF85 current, board at $AD00 (empty cell $FB).
+ */
+#define TDX_QUEUE_PIECE_OFFSET 0x3FFEu
+static bool g_tdx_hold = false;            /* saved as tdx.hold */
+static int g_tdx_preview = 4;              /* queue layout 0 off, 1-5; tdx.preview */
+static int g_tdx_hold_piece = -1;
+static bool g_tdx_hold_used = false;
+static std::atomic<bool> g_tdx_hold_req{false};
+static bool g_tdx_hold_spawning = false;
+static uint8_t g_tdx_q[8];
+static int g_tdx_qn = 0;
+static int g_tdx_q_mode = -1;
+static uint8_t g_tdx_q_counter = 0;
+static uint32_t g_tdx_rng = 0;
+static uint8_t g_tdx_bag = 0;              /* 7-Bag: bits of pieces left */
+static uint8_t g_tdx_hist[4];
+static uint8_t g_tdx_pool[35];
+static uint8_t g_tdx_order[7];
+static int g_tdx_order_n = 0;
+static std::atomic<bool> g_tdx_in_play{false};
+
+static uint32_t tdx_rand(void) {
+    /* xorshift32 */
+    uint32_t x = g_tdx_rng ? g_tdx_rng : 0x9E3779B9u;
+    x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+    g_tdx_rng = x;
+    return x;
+}
+
+static int tdx_gen_piece(void) {
+    if (g_tdx_q_mode == 1) {            /* 7-Bag */
+        if ((g_tdx_bag & 0x7F) == 0) g_tdx_bag = 0x7F;
+        int p;
+        do { p = (int)(tdx_rand() % 7u); } while (!(g_tdx_bag & (1u << p)));
+        g_tdx_bag &= (uint8_t)~(1u << p);
+        return p;
+    }
+    /* 35-Bag, modelled on TGM3: 35-piece pool, 4-piece history, up to 6 rolls,
+     * the longest-unseen piece goes back into the pool. */
+    int idx = 0, piece = 0;
+    for (int roll = 0; roll < 6; ++roll) {
+        idx = (int)(tdx_rand() % 35u);
+        piece = g_tdx_pool[idx];
+        bool in_hist = false;
+        for (int k = 0; k < 4; ++k) if (g_tdx_hist[k] == piece) in_hist = true;
+        if (!in_hist || roll == 5) break;
+        if (g_tdx_order_n > 0) g_tdx_pool[idx] = g_tdx_order[0];
+    }
+    int w = 0;
+    for (int k = 0; k < g_tdx_order_n; ++k) if (g_tdx_order[k] != piece) g_tdx_order[w++] = g_tdx_order[k];
+    g_tdx_order_n = w;
+    g_tdx_order[g_tdx_order_n++] = (uint8_t)piece;
+    g_tdx_pool[idx] = g_tdx_order[0];
+    g_tdx_hist[0] = g_tdx_hist[1]; g_tdx_hist[1] = g_tdx_hist[2]; g_tdx_hist[2] = g_tdx_hist[3];
+    g_tdx_hist[3] = (uint8_t)piece;
+    return piece;
+}
+
+static void tdx_queue_reset(int mode) {
+    g_tdx_q_mode = mode;
+    g_tdx_rng = (uint32_t)SDL_GetPerformanceCounter() ^ 0xA5A5F00Du;
+    g_tdx_bag = 0;
+    g_tdx_hist[0] = 3; g_tdx_hist[1] = 2; g_tdx_hist[2] = 3; g_tdx_hist[3] = 2;  /* S Z S Z */
+    for (int i = 0; i < 35; ++i) g_tdx_pool[i] = (uint8_t)(i % 7);
+    g_tdx_order_n = 0;
+    g_tdx_qn = 0;
+    if (mode == 0) return;
+    while (g_tdx_qn < 6) g_tdx_q[g_tdx_qn++] = (uint8_t)tdx_gen_piece();
+}
+
+static void tdx_queue_pop(void) {
+    for (int i = 1; i < g_tdx_qn; ++i) g_tdx_q[i - 1] = g_tdx_q[i];
+    g_tdx_qn--;
+    g_tdx_q[g_tdx_qn++] = (uint8_t)tdx_gen_piece();
+}
+
+/* Spawn position the game uses for piece t (DX rules, or SRS when on). */
+static void tdx_spawn_pos(int t, int* x, int* y, int* rot) {
+    *x = 5; *y = 1; *rot = 2;
+    if (g_tdx_srs) {
+        if (t == 0 || t == 6) *y = 0;
+    } else {
+        if (t != 2 && t != 3) *y = 0;
+        if (t != 0 && t != 6) *rot = 0;
+    }
+}
+
+/* The game's NEXT window: rebuild its 8 tile numbers and 8 attributes (the
+ * buffer at $AFA0 that bank 1 $4B67 fills) for piece t and ask for a redraw. */
+static void tdx_redraw_next(GBContext* ctx, int t) {
+    static const uint8_t srs_tiles[7][8] = {
+        {0xFF,0xFF,0xFF,0xFF, 0xB0,0xB1,0xB1,0xB2}, {0xFF,0x98,0xFF,0xFF, 0x98,0x98,0x98,0xFF},
+        {0xA0,0xA0,0xFF,0xFF, 0xFF,0xA0,0xA0,0xFF}, {0xFF,0xA8,0xA8,0xFF, 0xA8,0xA8,0xFF,0xFF},
+        {0x90,0xFF,0xFF,0xFF, 0x90,0x90,0x90,0xFF}, {0xFF,0xFF,0x88,0xFF, 0x88,0x88,0x88,0xFF},
+        {0xFF,0x80,0x80,0xFF, 0xFF,0x80,0x80,0xFF}};
+    static const uint8_t srs_attrs[7][8] = {
+        {6,6,6,6, 3,3,3,3}, {6,1,6,6, 1,1,1,6}, {2,2,6,6, 6,2,2,6}, {6,2,2,6, 2,2,6,6},
+        {1,6,6,6, 1,1,1,6}, {6,6,0,6, 0,0,0,6}, {6,0,0,6, 6,0,0,6}};
+    if (!ctx->eram || t < 0 || t > 6) return;
+    uint8_t* e = ctx->eram;
+    for (int i = 0; i < 8; ++i) {
+        e[0xFA0 + i] = g_tdx_srs ? srs_tiles[t][i] : ctx->rom[0x5F68 + t * 8 + i];
+        e[0xFA8 + i] = g_tdx_srs ? srs_attrs[t][i] : ctx->rom[0x5FA0 + t * 8 + i];
+    }
+    e[0xF9C] = 1;
+}
+
+static void tdx_queue_frame(GBContext* ctx) {
+    if (!ctx || !ctx->wram || !ctx->rom || ctx->rom_size <= TDX_QUEUE_PIECE_OFFSET) return;
+    const int mode = g_tdx_randomizer;
+    const uint8_t counter = ctx->wram[0xF80];
+    static uint8_t prev_state = 0;
+    const uint8_t st = ctx->eram ? ctx->eram[0xC0F] : 0;
+    if (mode != g_tdx_q_mode) {
+        tdx_queue_reset(mode);
+        g_tdx_q_counter = counter;
+    }
+    /* A new game has just set up its first piece and its next piece with the
+     * game's own randomizer ($AC0F goes to $12). Start a fresh bag and use its
+     * first two pieces instead, so the bag is right from the first piece. */
+    if (mode != 0 && ctx->eram && st == 0x12 && prev_state != 0x12) {
+        tdx_queue_reset(mode);
+        const int cur = g_tdx_q[0];
+        tdx_queue_pop();
+        const int next = g_tdx_q[0];
+        tdx_queue_pop();
+        int x, y, rot;
+        tdx_spawn_pos(cur, &x, &y, &rot);
+        uint8_t* e = ctx->eram;
+        e[0xF85] = (uint8_t)cur;
+        e[0xF84] = (uint8_t)next;
+        e[0xF80] = (uint8_t)x;
+        e[0xF81] = (uint8_t)y;
+        e[0xF82] = (uint8_t)rot;
+        tdx_redraw_next(ctx, next);
+        g_tdx_q_counter = counter;
+    }
+    prev_state = st;
+    if (mode != 0) {
+        uint8_t taken = (uint8_t)(counter - g_tdx_q_counter);
+        if (taken > 6) taken = 6;
+        for (int t = 0; t < taken; ++t) tdx_queue_pop();
+        g_tdx_q_counter = counter;
+        ctx->rom[TDX_QUEUE_PIECE_OFFSET] = g_tdx_q[0];
+    }
+}
+
+static bool tdx_piece_fits(GBContext* ctx, int t, int x, int y, int rot) {
+    const uint8_t* e = ctx->eram;
+    const uint8_t* rom = ctx->rom;
+    if (!e || !rom || t < 0 || t > 6) return false;
+    const unsigned ptr = rom[0x6202 + 2 * t] | (rom[0x6203 + 2 * t] << 8);
+    const unsigned shape = ptr + 16u * (unsigned)rot;
+    const unsigned base = 0xD00u + (unsigned)(((y & 0x0F) << 4) | x) + (unsigned)((y >> 4) << 8);
+    for (int r = 0; r < 4; ++r)
+        for (int c = 0; c < 4; ++c)
+            if (rom[shape + r * 4 + c] && e[(base + r * 16 + c) & 0x1FFF] != 0xFB) return false;
+    return true;
+}
+
+static void tdx_hold_frame(GBContext* ctx) {
+    if (!ctx || !ctx->eram) return;
+    uint8_t* e = ctx->eram;
+    static uint8_t prev = 0;
+    const uint8_t st = e[0xC0F];
+    /* In play: the play screen's palettes are up (see tdx_piece_colours). */
+    const uint8_t* pb = ctx->wram ? ctx->wram + 0x280 : NULL;
+    static const uint8_t bg6[8] = {0x43, 0x45, 0xFF, 0x7F, 0x49, 0x6A, 0x00, 0x00};
+    const bool play_screen = pb && memcmp(pb + 48, bg6, 8) == 0;
+    g_tdx_in_play.store(play_screen && st >= 3 && st <= 8, std::memory_order_relaxed);
+    if (st == 0x12 || st < 3) {
+        g_tdx_hold_piece = -1;               /* a new game starts with an empty box */
+        g_tdx_hold_used = false;
+    }
+    if (st == 3 && prev != 3) {              /* a new piece came in */
+        if (!g_tdx_hold_spawning) g_tdx_hold_used = false;
+        g_tdx_hold_spawning = false;
+    }
+    prev = st;
+    if (!g_tdx_hold_req.exchange(false)) return;
+    if (!g_tdx_hold || st != 3 || g_tdx_hold_used || e[0xC0A] == 4) return;
+    if (ctx->wram && ctx->wram[0x119]) return;     /* game over in progress */
+    const int cur = e[0xF85];
+    if (cur > 6) return;
+    if (g_tdx_hold_piece < 0) {
+        g_tdx_hold_piece = cur;
+        g_tdx_hold_used = true;
+        g_tdx_hold_spawning = true;
+        e[0xC62] = 0;
+        e[0xC0F] = 5;                        /* spawn the next piece */
+        return;
+    }
+    const int t = g_tdx_hold_piece;
+    int x, y, rot;
+    tdx_spawn_pos(t, &x, &y, &rot);
+    if (!tdx_piece_fits(ctx, t, x, y, rot)) return;
+    e[0xF85] = (uint8_t)t;
+    e[0xF80] = (uint8_t)x;
+    e[0xF81] = (uint8_t)y;
+    e[0xF82] = (uint8_t)rot;
+    e[0xC57] = 0x80;
+    e[0xF86] = 0x20;
+    e[0xF88] = 0;
+    g_tdx_hold_piece = cur;
+    g_tdx_hold_used = true;
+}
+
+/* Screen colour of a piece (for the hold box and queue): the colour of its
+ * blocks in the game's background palettes, through the chosen palette. */
+static uint32_t tdx_piece_argb(GBContext* ctx, int t) {
+    static const uint8_t slot[7][2] = {{3, 2}, {1, 2}, {2, 2}, {2, 0}, {1, 0}, {0, 0}, {0, 1}};
+    if (!ctx || !ctx->ppu || t < 0 || t > 6) return 0xFF9E9E9Eu;
+    const GBPPU* ppu = (const GBPPU*)ctx->ppu;
+    const int o = slot[t][0] * 8 + slot[t][1] * 2;
+    const uint32_t c = ppu->bg_palette_ram[o] | (ppu->bg_palette_ram[o + 1] << 8);
+    const uint32_t r = c & 31u, g = (c >> 5) & 31u, b = (c >> 10) & 31u;
+    uint32_t px = 0xFF000000u | ((r * 255u / 31u) << 16) | ((g * 255u / 31u) << 8) | (b * 255u / 31u);
+    uint32_t out = px;
+    tdx_copy_row(&out, &px, 1);
+    return out;
+}
+
+/* Piece pictures for the hold box and queue, made from the game's own block
+ * tiles in video RAM and its current background palettes (as in its NEXT
+ * window), passed through the chosen palette. Each piece is a 32 x 16 pixel
+ * ARGB picture: 4 x 2 tiles in its spawn orientation, transparent where empty.
+ * Nothing is copied from the ROM; the tiles are read live while a game runs. */
+static const char* const kTdxShapeDX[7] = {
+    "....####", "###..#..", "##...##.", ".##.##..", "###...#.", "###.#...", ".##..##."};
+static const char* const kTdxShapeSRS[7] = {
+    "....####", ".#..###.", "##...##.", ".##.##..", "#...###.", "..#.###.", ".##..##."};
+static const uint8_t kTdxPieceTile[7] = {0xB1, 0x98, 0xA0, 0xA8, 0x90, 0x88, 0x80};
+static const uint8_t kTdxPiecePal[7] = {3, 1, 2, 2, 1, 0, 0};
+
+static bool tdx_piece_image(GBContext* ctx, int t, uint32_t* out /* 32*16 */) {
+    if (!ctx || !ctx->vram || !ctx->ppu || t < 0 || t > 6) return false;
+    const GBPPU* ppu = (const GBPPU*)ctx->ppu;
+    const char* shape = (g_tdx_srs ? kTdxShapeSRS : kTdxShapeDX)[t];
+    uint32_t pal[4];
+    for (int k = 0; k < 4; ++k) {
+        const int o = kTdxPiecePal[t] * 8 + k * 2;
+        const uint32_t c = ppu->bg_palette_ram[o] | (ppu->bg_palette_ram[o + 1] << 8);
+        const uint32_t r = c & 31u, g = (c >> 5) & 31u, b = (c >> 10) & 31u;
+        uint32_t px = 0xFF000000u | ((r * 255u / 31u) << 16) | ((g * 255u / 31u) << 8) | (b * 255u / 31u);
+        tdx_copy_row(&pal[k], &px, 1);
+        pal[k] |= 0xFF000000u;
+    }
+    bool any = false;
+    for (int i = 0; i < 32 * 16; ++i) out[i] = 0;
+    for (int cell = 0; cell < 8; ++cell) {
+        if (shape[cell] != '#') continue;
+        const int cx = cell % 4, cy = cell / 4;
+        uint8_t tile = kTdxPieceTile[t];
+        if (t == 0) tile = cx == 0 ? 0xB0 : (cx == 3 ? 0xB2 : 0xB1);   /* I: end caps */
+        const uint8_t* td = ctx->vram + (0x0000u + tile * 16u);         /* $8000 + id*16 */
+        for (int y = 0; y < 8; ++y) {
+            const uint8_t lo = td[y * 2], hi = td[y * 2 + 1];
+            for (int x = 0; x < 8; ++x) {
+                const int bit = 7 - x;
+                const int ci = ((lo >> bit) & 1) | (((hi >> bit) & 1) << 1);
+                out[(cy * 8 + y) * 32 + cx * 8 + x] = pal[ci];
+                if (lo | hi) any = true;
+            }
+        }
+    }
+    return any;
+}
+
+/* Skip Celebrations, "Start skips": a celebration is game state $10
+ * (Marathon) or $11 (the other modes) in $C0A0. Pressing Start during one
+ * does what the game does when there is nothing to celebrate: next state 8
+ * ($C0A1) through the fade state 2 ($C0A0). The game's held buttons are in
+ * HRAM $FF82 (Start = bit 3). */
+static void tdx_celebration_frame(GBContext* ctx) {
+    static bool prev_start = true;
+    if (!ctx || !ctx->wram || !ctx->hram) return;
+    const bool start = (ctx->hram[0x02] & 0x08) != 0;
+    const uint8_t st = ctx->wram[0x0A0];
+    if (g_tdx_skipceleb == 2 && (st == 0x10 || st == 0x11) && start && !prev_start) {
+        if (st == 0x10) {
+            /* The Marathon celebration (bank $0B) ends by clearing its step
+             * counter $C0A8 and its fade timers $FF90/$FF91; do the same so
+             * the next one starts from its first step. */
+            ctx->wram[0x0A8] = 0;
+            ctx->hram[0x10] = 0;
+            ctx->hram[0x11] = 0;
+        }
+        /* The other celebration (bank $1C) ends exactly like this. */
+        ctx->wram[0x0A1] = 0x08;
+        ctx->wram[0x0A0] = 0x02;
+    }
+    prev_start = start;
+}
+
 /* ---- end Tetris DX additions ---- */

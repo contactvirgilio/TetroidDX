@@ -1,55 +1,37 @@
-# Tetroid DX
+# Tetroid DX 1.0
 
-An Android port of **Tetris DX** (Game Boy Color), built by **statically
-recompiling** the game into native code with
-[GB Recompiled](https://github.com/arcanite24/gb-recompiled), not by emulating
-it. The whole build runs in GitHub Actions; no PC needed.
+Tetris DX (Game Boy Color) on Android, built by **statically recompiling** the
+game with [GB Recompiled](https://github.com/arcanite24/gb-recompiled), not by
+emulating it. The whole build runs in GitHub Actions; no PC needed.
 
 This repository contains **no game data**. You supply your own legally
-obtained ROM, and the finished app asks for it again on first launch, so the
-APK itself never contains any part of the game.
+obtained ROM, and the app asks for it on first launch, so the APK never
+contains any part of the game.
 
 ## Features
+Everything is optional and off by default. With every patch off, the game runs
+its original code.
 
-**Gameplay toggles** (all off by default; with everything off and the Randomizer on Tetris DX,
-the game runs its original code):
-- **Hard Drop:** press Up to drop the piece instantly.
-- **Ghost Piece:** Off, Light or Dark.
-- **Don't Panic:** removes the game's danger reaction when the stack gets high.
-- **Skip Celebrations:** skips the end-of-game celebration scenes.
-- **Korobeiniki:** Music Type A plays the classic Tetris theme (both danger
-  stages still change the music).
-- **SRS Rotation:** Super Rotation System spawn orientation, wall kicks and
-  next-piece preview.
-- **Randomizer:** Tetris DX (original), 7-Bag or 35-Bag. The bag takes over
-  from the second piece of each game.
+- **Hard Drop** and **Ghost Piece** (light or dark)
+- **Hold** (touch button, or L1 / R1)
+- **Next-piece previews**: five layouts, plus **In game** for 4:3 handhelds
+- **Lock Delay**
+- **SRS Rotation**
+- **Randomizer**: Tetris DX, 7-Bag or 35-Bag
+- **Skip Celebrations**: Off, Always, or Start skips
+- **Korobeiniki**: Original, or Plus (adds a first panic song)
+- **Don't Panic**
+- **Palettes**: Original, GBC LCD, Swamp, Guideline, Sega, Amber Night
+- Scanlines and Mute
 
-**Display:**
-- **Palettes:** Original, GBC LCD (colour corrected to look like the real Game
-  Boy Color screen, default), Pastel, Swamp, Sunset, and Guideline and Sega
-  piece colours by CreeperCraftYT.
-- **Scanlines.**
-- Portrait and landscape; in portrait the game sits at the top with the
-  controls below.
+No save states, no widescreen.
 
-**Controls and app:**
-- Touch controls (D-pad, A, B, Select, Start, Menu) that hide when a gamepad is
-  used and come back when you touch the screen.
-- PATCHES card tiles to switch:
-  Hard Drop, Ghost Piece, Don't Panic, Skip Celebrations, Korobeiniki, SRS
-  Rotation and Randomizer. Opened with the Menu quick button, Select+Down, Android Back, Guide
-  or a gamepad shortcut. The game pauses while it is open.
-- Quick buttons top right (Mute, Palette, Scanlines, Menu) that fade after 15 s.
-- Gamepad shortcuts (buttons held together): Menu, Toggle Hard Drop, Cycle
-  Ghost Piece, Cycle Palette; set them on the Controls page.
-- Touch A and B light up in the original Game Boy's wine red when pressed.
-- Controller button remapping from the Controls page.
-- Low-latency audio tuned for Android devices.
-- The cartridge's own battery save (high scores) works. Save states are
-  deliberately not included.
-- With All files access (asked once, Android 11+), the save and settings are
-  kept in a TetroidDX folder in your device's main storage, and a ROM placed there is
-  found automatically.
+## Controls
+- Touch: on-screen buttons, with quick buttons on top (Mute, Palette, Scanlines, Menu).
+- Controller: the touch game buttons hide; D-pad or left stick moves in the
+  menu, A changes, B or Back closes. R3 or Mode opens the menu. L2 changes the palette.
+- With All files access (asked once, Android 11+), the save and settings live
+  in a TetroidDX folder in your device's main storage.
 
 ## How the toggles work
 
@@ -81,7 +63,7 @@ You need the ROM **Tetris DX (World) (SGB Enhanced).gbc** (No-Intro, CRC32
 5. Install it and pick your ROM when the app asks. It is checked against the
    ROM the build was made from.
 
-Requires Android 8 or newer (arm64).
+Requires Android 8 or newer (arm64). The APK is not published here.
 
 ## Repository layout
 
@@ -89,17 +71,18 @@ Requires Android 8 or newer (arm64).
   recompiling, Android build, a final check that the APK holds no ROM data).
 - `android/patch_project.py`: every change to the generated project, each one
   asserting it matched exactly, so upstream changes fail loudly.
-- `android/tdx_menu.inc`: the in-game menu (Dear ImGui).
+- `android/tdx_menu.inc`: the app/game bridge and the pause menu loop.
 - `android/tdx_platform.inc`: native additions (ROM loader, options byte,
-  palettes, scanlines, Select+Down, touch-overlay bridge).
+  palettes, scanlines, Hold and preview queue, touch-overlay bridge).
 - `android/*.java`: ROM picker, game activity and touch controls.
 - `android/*.asm`, `android/prepare_dontpanic.py`: the toggle patches.
 
 ## Credits
 
-See [CREDITS.md](CREDITS.md). In short: hard drop and ghost piece by
-lightbulb-sun (MIT), Don't Panic by DevEd, Skip Celebrations by llakssz, Korobeiniki (Music Fix) by Marc Robledo, and
-GB Recompiled by arcanite24 (MIT), plus SDL2, Dear ImGui and RGBDS.
+See [CREDITS.md](CREDITS.md). Hard drop and ghost piece by lightbulb-sun (MIT),
+Don't Panic by DevEd, Skip Celebrations by llakssz, Korobeiniki (Music Fix) by Marc Robledo,
+Hold / Preview / Lock Delay idea, testing and the Guideline and Sega palettes by CreeperCraftYT,
+and GB Recompiled by arcanite24 (MIT), plus SDL2, Dear ImGui and RGBDS.
 
 Tetris DX is a trademark of its respective owners. This is an unofficial fan
 project, not affiliated with or endorsed by Nintendo or The Tetris Company.

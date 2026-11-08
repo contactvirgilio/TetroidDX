@@ -13,13 +13,13 @@ game runs its original code.
   `android/harddrop_toggle.asm`). Made after a
   [request](https://www.romhacking.net/forum/index.php?topic=37345.0) by
   **SpongeDan**; ghost piece idea by **[szechp](https://github.com/szechp)**.
-- **Don't Panic**: after [hack #6879](https://www.romhacking.net/hacks/6879/)
-  by **DevEd**.
-- **Skip Celebrations**: after
-  [hack #4734](https://www.romhacking.net/hacks/4734/) v1.0 by **llakssz**.
-- **Korobeiniki**: after Tetris DX - Music Fix by **Marc Robledo** (2020).
-  Music Type A plays the classic theme; the first danger song stays the
-  game's own so both danger stages are heard.
+- **Don't Panic**: [hack #6879](https://www.romhacking.net/hacks/6879/) by
+  **DevEd** (after the hack; not redistributed here).
+- **Skip Celebrations**: [hack #4734](https://www.romhacking.net/hacks/4734/)
+  v1.0 by **llakssz** (after the hack; not redistributed here).
+- **Korobeiniki (Original)**: after Tetris DX - Music Fix by **Marc Robledo** (2020).
+  Music Type A plays the classic theme; his danger songs are used only while
+  it plays, so Music C keeps its own. His patch file is not included.
 - **SRS Rotation** and **Randomizer** (7-Bag, 35-Bag): written for Tetroid
   DX from [tetris.wiki](https://tetris.wiki/Super_Rotation_System) and the
   [Hard Drop wiki](https://harddrop.com/wiki/TGM_randomizer). 35-Bag is
@@ -27,12 +27,21 @@ game runs its original code.
   copy. The chosen bag takes over from the second piece of each game; the
   first piece still comes from the game's own setup. Random numbers: xorshift
   7/9/8 by John Metcalf, stirred with the Game Boy timer.
+- **Hold**, **Preview** and **Lock Delay**: the idea, and testing, by
+  **CreeperCraftYT**. Written for Tetroid DX.
+- **Korobeiniki (Plus)**: "Last Stand", an original first panic song written
+  for Tetroid DX.
 - **Guideline and Sega palettes**: piece colours by **CreeperCraftYT**.
+  **Amber Night** is original to Tetroid DX.
+
+## Testing
+
+- **CreeperCraftYT**: testing and ideas throughout.
 
 The original patch files are not redistributed here; get them from the links
 above. The `.asm` files re-create their changes as switchable routines.
 
-## Recompiler, libraries and tools
+## Recompiler and libraries
 
 - [GB Recompiled](https://github.com/arcanite24/gb-recompiled) by
   **arcanite24** (Brandon G. Neri), MIT: static recompiler and runtime.

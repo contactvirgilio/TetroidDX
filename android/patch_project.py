@@ -99,7 +99,7 @@ def rom_patch_table(original_rom, patched_rom):
     if len(a) != len(b):
         sys.exit("PATCH FAILED [rom diff]: patched ROM has a different size")
     diff = [(i, b[i]) for i in range(len(a)) if a[i] != b[i]]
-    if not 1 <= len(diff) <= 1200:
+    if not 1 <= len(diff) <= 2400:
         sys.exit(f"PATCH FAILED [rom diff]: unexpected number of changed bytes: {len(diff)}")
     print(f"ROM patch: {len(diff)} changed bytes")
     rows = ",\n".join(f"    {{0x{o:06X}u, 0x{v:02X}u}}" for o, v in diff)
@@ -115,6 +115,38 @@ def patch_platform(proj, patch_table):
     text = replace_exact(
         text, "static bool g_show_menu = false;\n",
         "static bool g_show_menu = false;\n" + inc, 1, "globals + helpers")
+
+    # The Retroid's A and B arrive swapped with the game's default mapping: GB A is the
+    # SDL A button and GB B the SDL B button (shoulder buttons are unchanged).
+    text = replace_exact(
+        text,
+        "    g_controller_bindings[GB_INPUT_ACTION_A][0] = make_binding(GB_INPUT_BINDING_CONTROLLER_BUTTON, SDL_CONTROLLER_BUTTON_B);\n",
+        "    g_controller_bindings[GB_INPUT_ACTION_A][0] = make_binding(GB_INPUT_BINDING_CONTROLLER_BUTTON, SDL_CONTROLLER_BUTTON_A);\n",
+        1, "controller A")
+    text = replace_exact(
+        text,
+        "    g_controller_bindings[GB_INPUT_ACTION_B][0] = make_binding(GB_INPUT_BINDING_CONTROLLER_BUTTON, SDL_CONTROLLER_BUTTON_A);\n",
+        "    g_controller_bindings[GB_INPUT_ACTION_B][0] = make_binding(GB_INPUT_BINDING_CONTROLLER_BUTTON, SDL_CONTROLLER_BUTTON_B);\n",
+        1, "controller B")
+
+    # Saved preferences override the defaults above, so force these after loading them.
+    text = replace_exact(
+        text,
+        "            make_binding(GB_INPUT_BINDING_NONE, 0);\n    }\n    update_effective_joypad_state();\n}",
+        "            make_binding(GB_INPUT_BINDING_NONE, 0);\n    }\n"
+        "    g_controller_bindings[GB_INPUT_ACTION_A][0] = make_binding(GB_INPUT_BINDING_CONTROLLER_BUTTON, SDL_CONTROLLER_BUTTON_A);\n"
+        "    g_controller_bindings[GB_INPUT_ACTION_B][0] = make_binding(GB_INPUT_BINDING_CONTROLLER_BUTTON, SDL_CONTROLLER_BUTTON_B);\n"
+        "    g_controller_bindings[GB_INPUT_ACTION_FAST_FORWARD][0] = make_binding(GB_INPUT_BINDING_NONE, 0);\n"
+        "    g_controller_bindings[GB_INPUT_ACTION_TOGGLE_MAX_SPEED][0] = make_binding(GB_INPUT_BINDING_NONE, 0);\n"
+        "    update_effective_joypad_state();\n}",
+        1, "force controller bindings after loading prefs")
+
+    # L2 / R2 are not fast forward / max speed any more (L2 changes the palette in the app).
+    text = replace_exact(
+        text,
+        "    g_controller_bindings[GB_INPUT_ACTION_FAST_FORWARD][0] = make_binding(GB_INPUT_BINDING_CONTROLLER_AXIS_POSITIVE, SDL_CONTROLLER_AXIS_TRIGGERRIGHT);\n"
+        "    g_controller_bindings[GB_INPUT_ACTION_TOGGLE_MAX_SPEED][0] = make_binding(GB_INPUT_BINDING_CONTROLLER_AXIS_POSITIVE, SDL_CONTROLLER_AXIS_TRIGGERLEFT);\n",
+        "", 1, "unbind L2/R2")
 
     text = replace_exact(
         text,
@@ -145,14 +177,6 @@ def patch_platform(proj, patch_table):
         "    g_game_viewport.y = tdx_viewport_y(window_w, window_h, viewport_h);\n",
         1, "portrait viewport")
 
-    text = replace_exact(
-        text,
-        "        bool fullscreen = g_fullscreen;\n"
-        "        if (ImGui::Checkbox(\"Fullscreen\", &fullscreen)) {\n",
-        MENU_BLOCK +
-        "        bool fullscreen = g_fullscreen;\n"
-        "        if (ImGui::Checkbox(\"Fullscreen\", &fullscreen)) {\n",
-        1, "menu toggles")
 
     text = replace_exact(
         text,
@@ -170,13 +194,22 @@ def patch_platform(proj, patch_table):
         "                    g_tdx_harddrop = (strcmp(value, \"0\") != 0);\n"
         "                    continue;\n"
         "                }\n"
-        "                if (strncmp(key, \"tdx.sc\", 6) == 0 && key[6] >= '0' && key[6] < '0' + TDX_SC_COUNT && !key[7]) {\n"
-        "                    tdx_sc_parse(key[6] - '0', value);\n"
-        "                    continue;\n"
-        "                }\n"
         "                if (strcmp(key, \"display.pal\") == 0) {\n"
         "                    long pv = strtol(value, NULL, 10);\n"
-        "                    g_tdx_palette = (pv >= 0 && pv < TDX_PAL_COUNT) ? (int)pv : TDX_PAL_GBC_LCD;\n"
+        "                    g_tdx_palette = (pv >= 0 && pv < TDX_PAL_COUNT && pv != TDX_PAL_PASTEL && pv != TDX_PAL_SUNSET && pv != TDX_PAL_GRAPHITE) ? (int)pv : TDX_PAL_GBC_LCD;\n"
+        "                    continue;\n"
+        "                }\n"
+        "                if (strcmp(key, \"tdx.lock\") == 0) {\n"
+        "                    g_tdx_lockdelay = (strcmp(value, \"0\") != 0);\n"
+        "                    continue;\n"
+        "                }\n"
+        "                if (strcmp(key, \"tdx.preview\") == 0) {\n"
+        "                    long pv2 = strtol(value, NULL, 10);\n"
+        "                    g_tdx_preview = (pv2 >= 0 && pv2 <= 5) ? (int)pv2 : 4;\n"
+        "                    continue;\n"
+        "                }\n"
+        "                if (strcmp(key, \"tdx.hold\") == 0) {\n"
+        "                    g_tdx_hold = (strcmp(value, \"0\") != 0);\n"
         "                    continue;\n"
         "                }\n"
         "                if (strcmp(key, \"tdx.rand\") == 0) {\n"
@@ -189,11 +222,11 @@ def patch_platform(proj, patch_table):
         "                    continue;\n"
         "                }\n"
         "                if (strcmp(key, \"tdx.korobeiniki\") == 0) {\n"
-        "                    g_tdx_korobeiniki = (strcmp(value, \"0\") != 0);\n"
+        "                    g_tdx_korobeiniki = atoi(value); if (g_tdx_korobeiniki < 0 || g_tdx_korobeiniki > 2) g_tdx_korobeiniki = 0;\n"
         "                    continue;\n"
         "                }\n"
         "                if (strcmp(key, \"tdx.skipceleb\") == 0) {\n"
-        "                    g_tdx_skipceleb = (strcmp(value, \"0\") != 0);\n"
+        "                    { long sv = strtol(value, NULL, 10); g_tdx_skipceleb = (sv >= 0 && sv <= 2) ? (int)sv : 0; }\n"
         "                    continue;\n"
         "                }\n"
         "                if (strcmp(key, \"tdx.dontpanic\") == 0) {\n"
@@ -216,12 +249,15 @@ def patch_platform(proj, patch_table):
         "    fprintf(file, \"tdx.harddrop=%d\\n\", g_tdx_harddrop ? 1 : 0);\n"
         "    fprintf(file, \"tdx.ghost=%d\\n\", g_tdx_ghost);\n"
         "    fprintf(file, \"tdx.dontpanic=%d\\n\", g_tdx_dontpanic ? 1 : 0);\n"
-        "    fprintf(file, \"tdx.skipceleb=%d\\n\", g_tdx_skipceleb ? 1 : 0);\n"
-        "    fprintf(file, \"tdx.korobeiniki=%d\\n\", g_tdx_korobeiniki ? 1 : 0);\n"
+        "    fprintf(file, \"tdx.skipceleb=%d\\n\", g_tdx_skipceleb);\n"
+        "    fprintf(file, \"tdx.korobeiniki=%d\\n\", g_tdx_korobeiniki);\n"
         "    fprintf(file, \"tdx.srs=%d\\n\", g_tdx_srs ? 1 : 0);\n"
         "    fprintf(file, \"tdx.rand=%d\\n\", g_tdx_randomizer);\n"
+        "    fprintf(file, \"tdx.hold=%d\\n\", g_tdx_hold ? 1 : 0);\n"
+        "    fprintf(file, \"tdx.preview=%d\\n\", g_tdx_preview);\n"
+        "    fprintf(file, \"tdx.lock=%d\\n\", g_tdx_lockdelay ? 1 : 0);\n"
         "    fprintf(file, \"display.pal=%d\\n\", g_tdx_palette);\n"
-        "    for (int sc = 0; sc < TDX_SC_COUNT; ++sc) fprintf(file, \"tdx.sc%d=%s\\n\", sc, tdx_sc_value(sc).c_str());\n",
+        "",
         1, "prefs save")
 
     text = remove_savestates(text)
@@ -231,21 +267,10 @@ def patch_platform(proj, patch_table):
     text = replace_exact(
         text,
         "    tdx_sync_options(g_registered_ctx);\n",
-        "    tdx_sync_options(g_registered_ctx);\n    tdx_piece_colours(g_registered_ctx);\n    tdx_process_requests();\n",
+        "    tdx_sync_options(g_registered_ctx);\n    tdx_piece_colours(g_registered_ctx);\n"
+        "    tdx_queue_frame(g_registered_ctx);\n    tdx_hold_frame(g_registered_ctx);\n"
+        "    tdx_celebration_frame(g_registered_ctx);\n    tdx_process_requests();\n",
         1, "menu requests")
-    # Gamepad shortcuts see every controller button before the game does.
-    text = replace_exact(
-        text,
-        "    if (handle_binding_capture_event(event)) {\n"
-        "        return true;\n"
-        "    }\n",
-        "    if (handle_binding_capture_event(event)) {\n"
-        "        return true;\n"
-        "    }\n"
-        "    if (tdx_shortcut_event(event, !g_show_menu)) {\n"
-        "        return true;\n"
-        "    }\n",
-        1, "gamepad shortcuts")
     # Settings go next to the save: in the --save-dir folder when one is given
     # (Tetroid DX passes the TetroidDX folder in the device's main storage).
     text = replace_exact(
@@ -269,7 +294,8 @@ def patch_platform(proj, patch_table):
         text,
         "    g_joypad_buttons = g_manual_joypad_buttons & g_script_joypad_buttons;\n",
         "    g_joypad_buttons = g_manual_joypad_buttons & g_script_joypad_buttons;\n"
-        "    tdx_check_menu_combo(g_manual_joypad_buttons, g_manual_joypad_dpad);\n",
+        "    tdx_check_menu_combo(g_manual_joypad_buttons, g_manual_joypad_dpad);\n"
+        "",
         1, "select+down menu")
     text = lower_audio_latency(text)
     text = half_volume(text)
@@ -356,10 +382,6 @@ def install_menu(text):
         "\n"
         "        while (g_app_suspended) {\n",
         1, "menu pauses game")
-    text = replace_exact(
-        text, "    ImGui::StyleColorsDark();\n",
-        "    ImGui::StyleColorsDark();\n    tdx_load_menu_font();\n",
-        1, "menu font")
     return text
 
 
@@ -408,48 +430,6 @@ def remove_savestates(text):
     return text
 
 
-MENU_BLOCK = r"""        ImGui::TextDisabled("Tetroid DX");
-        if (ImGui::Checkbox("Hard Drop (press Up)", &g_tdx_harddrop)) {
-            save_runtime_preferences();
-        }
-        {
-            static const char* tdx_ghost_names[] = {"Off", "Light", "Dark"};
-            if (ImGui::Combo("Ghost Piece", &g_tdx_ghost, tdx_ghost_names, 3)) {
-                save_runtime_preferences();
-            }
-        }
-        if (ImGui::Checkbox("Don't Panic", &g_tdx_dontpanic)) {
-            save_runtime_preferences();
-        }
-        if (ImGui::Checkbox("Skip Celebrations", &g_tdx_skipceleb)) {
-            save_runtime_preferences();
-        }
-        {
-            static const char* tdx_palette_names[] = {"Original", "GBC LCD", "Pastel", "Swamp", "Sunset", "Guideline", "Sega"};
-            if (ImGui::Combo("Palette", &g_tdx_palette, tdx_palette_names, TDX_PAL_COUNT)) {
-                save_runtime_preferences();
-            }
-        }
-        if (ImGui::Checkbox("Scanlines", &g_tdx_scanlines)) {
-            save_runtime_preferences();
-        }
-        if (ImGui::CollapsingHeader("Credits")) {
-            ImGui::TextWrapped("Hard drop and ghost piece: tetrisdx-harddrop by lightbulb-sun "
-                               "(github.com/lightbulb-sun/tetrisdx-harddrop), MIT License, "
-                               "Copyright (c) 2023 lightbulb-sun. Made following a "
-                               "romhacking.net request by SpongeDan. Ghost piece idea by szechp.");
-            ImGui::TextWrapped("Don't Panic by DevEd (romhacking.net/hacks/6879), "
-                               "made switchable for this build.");
-            ImGui::TextWrapped("Skip Celebrations v1.0 by llakssz (romhacking.net/hacks/4734), "
-                               "made switchable for this build.");
-            ImGui::TextWrapped("Recompiled with GB Recompiled by arcanite24 "
-                               "(github.com/arcanite24/gb-recompiled), MIT License.");
-            ImGui::TextWrapped("Uses SDL2 (zlib License) and Dear ImGui (MIT License).");
-            ImGui::TextWrapped("Tetris DX is a trademark of its owners. Unofficial fan port; "
-                               "you supply your own ROM.");
-        }
-        ImGui::Separator();
-"""
 
 
 def squares(off, size=17, pitch=18, x0=27, y0=36):
@@ -546,7 +526,7 @@ android {
         minSdk 26
         targetSdk 34
         versionCode 22
-        versionName "1.5.0"
+        versionName "1.0.0"
         externalNativeBuild {
             cmake {
                 arguments "-DANDROID_STL=c++_shared", "-DSDL2_SOURCE_DIR=${sdl2SourceDir}"

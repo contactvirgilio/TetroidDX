@@ -193,7 +193,80 @@ public class SetupActivity extends Activity {
         status.setPadding(0, dp(16), 0, 0);
         root.addView(status);
 
+        TextView credits = new TextView(this);
+        credits.setText("Credits");
+        credits.setTypeface(Typeface.DEFAULT);
+        credits.setTextColor(0xFF9E9E9E);
+        credits.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        credits.setPaintFlags(credits.getPaintFlags() | android.graphics.Paint.UNDERLINE_TEXT_FLAG);
+        credits.setGravity(Gravity.CENTER);
+        credits.setPadding(dp(16), dp(20), dp(16), dp(8));
+        credits.setOnClickListener(v -> showCredits());
+        root.addView(credits);
+
         setContentView(root);
+    }
+
+    /** Credits and licence notices, shown from the ROM screen. */
+    static final String CREDITS =
+            "Tetroid DX is an unofficial fan port. It contains no game data; you supply "
+            + "your own ROM. Tetris DX is a trademark of its owners.\n\n"
+            + "PATCHES\n"
+            + "Hard Drop and Ghost Piece: tetrisdx-harddrop by lightbulb-sun (MIT), made "
+            + "after a request by SpongeDan; ghost piece idea by szechp.\n"
+            + "Don't Panic: DevEd.\n"
+            + "Skip Celebrations: llakssz.\n"
+            + "Korobeiniki (Original): after Tetris DX - Music Fix by Marc Robledo. "
+            + "Korobeiniki (Plus): Last Stand, an original first panic song written for "
+            + "Tetroid DX.\n"
+            + "Hold, Preview and Lock Delay: idea and testing by CreeperCraftYT; written "
+            + "for Tetroid DX.\n"
+            + "SRS Rotation and Randomizer (7-Bag, 35-Bag): written for Tetroid DX from "
+            + "tetris.wiki and the Hard Drop wiki. Random numbers: xorshift by John "
+            + "Metcalf.\n"
+            + "Guideline and Sega palettes: CreeperCraftYT. Amber Night: Tetroid DX.\n"
+            + "Testing and ideas: CreeperCraftYT.\n\n"
+            + "SOFTWARE\n"
+            + "GB Recompiled by arcanite24 (MIT). SDL2 (zlib License). Dear ImGui by Omar "
+            + "Cornut (MIT). Patches assembled with RGBDS.\n"
+            + "BPreplay font, Copyright (c) 2004 George Triantafyllakos and Magenta, "
+            + "SIL Open Font License 1.1.\n\n"
+            + "Android app, menu and touch controls built with Claude (Anthropic) "
+            + "together with the project owner.\n\n"
+            + "MIT LICENSE (tetrisdx-harddrop: Copyright (c) 2023 lightbulb-sun; "
+            + "GB Recompiled: Copyright (c) 2026 arcanite24; Dear ImGui: Copyright (c) "
+            + "Omar Cornut)\n"
+            + "Permission is hereby granted, free of charge, to any person obtaining a copy "
+            + "of this software and associated documentation files (the \"Software\"), to "
+            + "deal in the Software without restriction, including without limitation the "
+            + "rights to use, copy, modify, merge, publish, distribute, sublicense, and/or "
+            + "sell copies of the Software, and to permit persons to whom the Software is "
+            + "furnished to do so, subject to the following conditions:\n"
+            + "The above copyright notice and this permission notice shall be included in "
+            + "all copies or substantial portions of the Software.\n"
+            + "THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR "
+            + "IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, "
+            + "FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE "
+            + "AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER "
+            + "LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, "
+            + "OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE "
+            + "SOFTWARE.";
+
+    private void showCredits() {
+        android.widget.ScrollView scroll = new android.widget.ScrollView(this);
+        scroll.setBackgroundColor(Color.BLACK);
+        TextView t = new TextView(this);
+        t.setText(CREDITS);
+        t.setTypeface(Typeface.DEFAULT);
+        t.setTextColor(0xFFBDBDBD);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        t.setPadding(dp(24), dp(24), dp(24), dp(24));
+        scroll.addView(t);
+        new android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("Credits")
+                .setView(scroll)
+                .setPositiveButton("Close", null)
+                .show();
     }
 
     @Override

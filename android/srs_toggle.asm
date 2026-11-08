@@ -167,7 +167,7 @@ srs_rotate::
 
 ; Copy of the game's collision test at bank 1 $5932, so bank-0 code can use
 ; it without a cross-bank call. a = 1 if the piece fits.
-srs_fits:
+srs_fits::
         ld      hl, $ad00
         ld      a, [PIECE_X]
         ld      c, a

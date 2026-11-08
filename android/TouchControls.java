@@ -1,6 +1,7 @@
 package org.tetrisdx.recomp;
 
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Path;
@@ -25,23 +26,30 @@ import org.libsdl.app.SDLActivity;
  *   after 15 s, as in the DKC ports (Lemuroid style);
  * - the centre feedback card (title, value, one bar per choice);
  * - the PATCHES card: the main menu, opened by the Menu quick button, the
- *   Menu shortcut, Select + D-pad Down, Guide or Android Back. The game is
+ *   Select + D-pad Down, Guide or Android Back. The game is
  *   paused while it is open;
- * - the teal confirmation pill.
+ * - the hold box and the piece queue, and the HOLD button.
  */
 public class TouchControls extends View {
 
     static native boolean nativeMenuOpen();
     static native boolean nativeHardDropOn();
     /** ids: 0 Hard Drop, 1 Ghost, 2 Don't Panic, 3 Skip Celebrations, 4 Palette,
-     *  5 Scanlines, 6 Mute, 7 menu page (-1 closed, 0 PATCHES card, 1 Controls, 2 Credits),
-     *  8 Korobeiniki, 9 SRS, 10 Randomizer (0 DX, 1 7-Bag, 2 35-Bag). */
+     *  5 Scanlines, 6 Mute, 7 menu (-1 closed, 0 PATCHES card open),
+     *  8 Korobeiniki, 9 SRS, 10 Randomizer (0 DX, 1 7-Bag, 2 35-Bag), 11 Hold;
+     *  read only: 12 held piece (-1 none), 13 queue length, 14-18 queue,
+     *  19 in play, 20-26 piece colours (ARGB), 27 SRS on, 28 hold used,
+     *  29 preview (0 off, 1-4 layout), 30 Lock Delay. */
     static native int nativeGet(int id);
     static native void nativeSet(int id, int value);
+    /** The game's own picture of piece t (32 x 16 ARGB, 4 x 2 tiles in its spawn
+     *  orientation), read live from video RAM; false when not available. */
+    static native boolean nativePieceImage(int t, int[] out);
+    static native int nativeSample(int x, int y);
     /** bits: 1 open the PATCHES card, 2 close, 4 Controls page, 8 Credits page. */
     static native void nativeRequest(int bits);
 
-    private static final int REQ_OPEN = 1, REQ_CLOSE = 2;
+    private static final int REQ_OPEN = 1, REQ_CLOSE = 2, REQ_HOLD = 32;
 
     private static final int UP = 0, DOWN = 1, LEFT = 2, RIGHT = 3,
             A = 4, B = 5, SELECT = 6, START = 7, COUNT = 8;
@@ -61,8 +69,11 @@ public class TouchControls extends View {
     private static final int WINE_LABEL = 0xFFF2DCE4;
 
     private static final String[] GHOST_NAMES = {"Off", "Light", "Dark"};
+    private static final String[] SKIP_NAMES = {"Off", "Always", "Start skips"};
     private static final String[] RAND_NAMES = {"Tetris DX", "7-Bag", "35-Bag"};
-    private static final String[] PALETTE_NAMES = {"Original", "GBC LCD", "Pastel", "Swamp", "Sunset", "Guideline", "Sega"};
+    // Pastel (2), Sunset (4) and Graphite (8) were removed; the ids stay so saved settings still line up.
+    private static final int[] PALETTE_IDS = {0, 1, 3, 5, 6, 7};
+    private static final String[] PALETTE_NAMES = {"Original", "GBC LCD", "Pastel", "Swamp", "Sunset", "Guideline", "Sega", "Amber Night", "Graphite"};
 
     private final boolean[] pressed = new boolean[COUNT];
     private final Paint stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -73,24 +84,23 @@ public class TouchControls extends View {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final float density;
 
-    // Teal confirmation pill (Cannoli style), shown by native code via pill().
-    private static TouchControls instance;
-    private final Paint pillFill = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint pillText = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final RectF pillRect = new RectF();
-    private String pillMessage;
-    private long pillStart;
-    private static final long PILL_MS = 2200, PILL_FADE_MS = 300;
 
-    private boolean menuOpen = false;     // any menu page (card or ImGui list)
+    private static TouchControls instance;   // for the centre card, posted from native code
+    private boolean menuOpen = false;     // the PATCHES card is open
     private boolean hardDropOn = false;
     private boolean gamepadMode = false;
+    private boolean controllerPresent = false;   // a physical controller is connected: no touch controls at all
     private int lastPage = -1;
 
     // Layout, recomputed in onSizeChanged.
     private float dpadX, dpadY, dpadR;
     private float aX, aY, bX, bY, btnR;
     private final RectF selectRect = new RectF(), startRect = new RectF();
+    /** Touch Hold button (shown while Hold is on): a pill just above Select and
+     *  Start in portrait, above Start in landscape. Presses go to native code. */
+    private final RectF holdBtnRect = new RectF();
+    private boolean holdBtnDown = false;
+    private boolean holdBtnHit = false;
     private final Path dpadPath = new Path();
 
     private final Runnable poll = new Runnable() {
@@ -101,6 +111,11 @@ public class TouchControls extends View {
                 hardDropOn = nativeHardDropOn();
             } catch (Throwable ignored) {
             }
+            int sig = holdQueueSignature();
+            if (sig != lastHqSig) {
+                lastHqSig = sig;
+                invalidate();
+            }
             if (page != lastPage) {
                 if (page == 0 && lastPage != 0) openedCard();
                 if (page >= 0 && lastPage < 0) releaseAll();
@@ -108,7 +123,7 @@ public class TouchControls extends View {
                 menuOpen = page >= 0;
                 invalidate();
             }
-            handler.postDelayed(this, 120);
+            handler.postDelayed(this, 50);
         }
     };
 
@@ -122,17 +137,9 @@ public class TouchControls extends View {
         fill.setColor(FILL);
         text.setColor(LABEL);
         text.setTextAlign(Paint.Align.CENTER);
-        Typeface face;
-        try {
-            face = Typeface.createFromAsset(context.getAssets(), "BPreplayBold.otf");
-        } catch (RuntimeException e) {
-            face = Typeface.create("sans-serif-medium", Typeface.BOLD);
-        }
-        text.setTypeface(face);
-        pillFill.setColor(0xFF00897B);
-        pillText.setColor(0xFFFFFFFF);
-        pillText.setTextAlign(Paint.Align.CENTER);
-        pillText.setTypeface(face);
+        // Button labels (A, B, SELECT, START, HOLD) and the HOLD/NEXT boxes use
+        // the same face as the PATCHES card's tile names.
+        text.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         instance = this;
     }
 
@@ -179,6 +186,23 @@ public class TouchControls extends View {
         }
     }
 
+    /** With a controller connected the game buttons (D-pad, A/B, Start/Select, Hold) are never
+     *  shown or used; the quick buttons at the top stay. */
+    public void setControllerPresent(boolean on) {
+        if (controllerPresent == on) return;
+        controllerPresent = on;
+        if (on) releaseAll();
+        invalidate();
+    }
+
+    public void cyclePalette() {
+        if (menuPage() < 0) quickAct(Q_PALETTE);
+    }
+
+    public void openMenu() {
+        if (menuPage() < 0) nreq(REQ_OPEN);
+    }
+
     public void setGamepadMode(boolean on) {
         if (gamepadMode == on) return;
         gamepadMode = on;
@@ -200,6 +224,8 @@ public class TouchControls extends View {
         // Same pixel-perfect game rectangle the runtime uses.
         int scale = Math.max(1, Math.min(w / 160, h / 144));
         float gw = 160f * scale, gh = 144f * scale;
+        gameW = gw;
+        gameH = gh;
         float gx = (w - gw) / 2f;
         float gy;
         if (h > w) {
@@ -226,6 +252,8 @@ public class TouchControls extends View {
             float pillY = Math.min(h - pillH - 24 * dp, top + area * 0.80f);
             selectRect.set(w / 2f - pillW - 10 * dp, pillY, w / 2f - 10 * dp, pillY + pillH);
             startRect.set(w / 2f + 10 * dp, pillY, w / 2f + pillW + 10 * dp, pillY + pillH);
+            float hy = pillY - pillH - 32 * dp;
+            holdBtnRect.set(w / 2f - pillW / 2f, hy, w / 2f + pillW / 2f, hy + pillH);
         } else {
             // Landscape: controls in the side areas next to the game.
             float side = Math.max(gx, w * 0.18f);
@@ -243,7 +271,13 @@ public class TouchControls extends View {
             float pillY = h - pillH - 20 * dp;
             selectRect.set(dpadX - pillW / 2f, pillY, dpadX + pillW / 2f, pillY + pillH);
             startRect.set(rx - pillW / 2f, pillY, rx + pillW / 2f, pillY + pillH);
+            float hy = pillY - pillH - 12 * dp;
+            holdBtnRect.set(rx - pillW / 2f, hy, rx + pillW / 2f, hy + pillH);
         }
+
+        gameX = gx;
+        gameY = gy;
+        layoutHoldQueue(w, h);
 
         // Plus-shaped D-pad outline.
         float arm = dpadR * 0.33f;
@@ -274,19 +308,15 @@ public class TouchControls extends View {
         if (cardVisible) {
             drawPatches(c);
             drawCard(c);
-            drawPill(c);
             return;
         }
-        if (page >= 0) {          // an ImGui list page (Controls, Credits): nothing on top
-            drawPill(c);
-            return;
-        }
-        if (!gamepadMode) drawPad(c);
-        drawQuick(c);
+        if (page >= 0) return;    // closing: nothing on top
+        if (!gamepadMode && !controllerPresent) drawPad(c);
+        drawHoldQueue(c);
+        drawQuick(c);                       // Mute / Palette / Scanlines / Menu stay
         drawCard(c);
-        drawPill(c);
         // keep the fade and the cards moving
-        if (quickFading() || cardTitle != null || pillMessage != null) postInvalidateOnAnimation();
+        if (quickFading() || cardTitle != null) postInvalidateOnAnimation();
         else postInvalidateDelayed(500);
     }
 
@@ -322,6 +352,11 @@ public class TouchControls extends View {
         if (pressed[START]) c.drawRoundRect(startRect, pr, pr, fill);
         c.drawRoundRect(startRect, pr, pr, stroke);
         drawLabel(c, "START", startRect.centerX(), startRect.centerY());
+        if (holdButtonShown()) {
+            if (holdBtnDown) c.drawRoundRect(holdBtnRect, pr, pr, fill);
+            c.drawRoundRect(holdBtnRect, pr, pr, stroke);
+            drawLabel(c, "HOLD", holdBtnRect.centerX(), holdBtnRect.centerY());
+        }
     }
 
     private void drawLabel(Canvas c, String s, float x, float y) {
@@ -329,39 +364,6 @@ public class TouchControls extends View {
         c.drawText(s, x, y - (fm.ascent + fm.descent) / 2f, text);
     }
 
-    /** Called from native code (JNI) on any thread. */
-    public static void pill(String message) {
-        final TouchControls v = instance;
-        if (v == null || message == null) return;
-        v.post(() -> {
-            v.pillMessage = message;
-            v.pillStart = SystemClock.uptimeMillis();
-            v.invalidate();
-        });
-    }
-
-    private void drawPill(Canvas c) {
-        if (pillMessage == null) return;
-        long t = SystemClock.uptimeMillis() - pillStart;
-        if (t >= PILL_MS) {
-            pillMessage = null;
-            return;
-        }
-        float alpha = t > PILL_MS - PILL_FADE_MS ? (PILL_MS - t) / (float) PILL_FADE_MS : 1f;
-        float v = Math.min(getWidth(), getHeight()) / 7f;
-        pillText.setTextSize(0.30f * v);
-        float tw = pillText.measureText(pillMessage);
-        float h = 0.42f * v, pad = 0.22f * v;
-        float cx = getWidth() / 2f, cy = getHeight() - 0.62f * v;
-        pillRect.set(cx - tw / 2f - pad, cy - h / 2f, cx + tw / 2f + pad, cy + h / 2f);
-        int a = Math.round(alpha * 255);
-        pillFill.setAlpha(a);
-        pillText.setAlpha(a);
-        c.drawRoundRect(pillRect, h / 2f, h / 2f, pillFill);
-        Paint.FontMetrics fm = pillText.getFontMetrics();
-        c.drawText(pillMessage, cx, cy - (fm.ascent + fm.descent) / 2f, pillText);
-        postInvalidateOnAnimation();
-    }
 
     // ------------------------------------------------- shared drawing helpers
 
@@ -393,6 +395,332 @@ public class TouchControls extends View {
         c.drawText(t, cx, cy - (paint.ascent() + paint.descent()) / 2f, paint);
         paint.setTextAlign(Paint.Align.LEFT);
         paint.setTypeface(Typeface.DEFAULT);
+    }
+
+    // ------------------------------------------------ hold box and piece queue
+
+    // Shapes in their spawn orientation, 4 x 2 cells ("#" = block), by piece
+    // number (0 I, 1 T, 2 Z, 3 S, 4 J, 5 L, 6 O). DX shows T, J and L flat side
+    // up; with SRS on they spawn flat side down.
+    private static final String[] SHAPES_DX = {
+            "....####", "###..#..", "##...##.", ".##.##..", "###...#.", "###.#...", ".##..##."};
+    private static final String[] SHAPES_SRS = {
+            "....####", ".#..###.", "##...##.", ".##.##..", "#...###.", "..#.###.", ".##..##."};
+    private float gameX, gameY, gameW, gameH;
+    private final RectF holdRect = new RectF();
+    private final RectF[] queueRect = {new RectF(), new RectF(), new RectF()};
+    private final RectF nextRect = new RectF();   // one box holding all three
+    private boolean landscape = false;
+    private int layoutW, layoutH, layoutStyle = -1;
+    private int lastHqSig = 0;
+    private final Bitmap[] pieceBmp = new Bitmap[7];
+    private final int[] pieceBuf = new int[32 * 16];
+    private long pieceBmpTime = 0;
+    private int pieceBmpSig = 0;
+    private final android.graphics.Rect bmpSrc = new android.graphics.Rect();
+    private final RectF bmpDst = new RectF();
+    private final Paint bmpPaint = new Paint();   // no filtering: sharp pixels
+
+    /** The game's own piece picture, refreshed when the palette or rotation
+     *  system changes and every half second (null until a game has drawn it). */
+    private Bitmap pieceBitmap(int t) {
+        long now = SystemClock.uptimeMillis();
+        int sig = nget(4) * 3 + nget(27);
+        if (sig != pieceBmpSig || now - pieceBmpTime > 500) {
+            pieceBmpSig = sig;
+            pieceBmpTime = now;
+            for (int i = 0; i < 7; i++) {
+                boolean ok = false;
+                try {
+                    ok = nativePieceImage(i, pieceBuf);
+                } catch (Throwable ignored) {
+                }
+                if (!ok) {
+                    pieceBmp[i] = null;
+                    continue;
+                }
+                if (pieceBmp[i] == null) {
+                    pieceBmp[i] = Bitmap.createBitmap(32, 16, Bitmap.Config.ARGB_8888);
+                }
+                pieceBmp[i].setPixels(pieceBuf, 0, 32, 0, 0, 32, 16);
+            }
+        }
+        return pieceBmp[t];
+    }
+
+    /** Preview setting (native id 29): 0 off, 1-5 layout. In landscape, layout 1
+     *  stacks three boxes down the right margin and 2-4 use one box there.
+     *  Layout 5 draws inside the game screen, over the game's NEXT window, so it
+     *  also works where there is no room around the game (RPC). */
+    /** 4:3 screens (e.g. Retroid Pocket Classic): only Preview Off / In game make sense. */
+    private boolean isCompact() {
+        float aspect = getHeight() > 0 ? (float) getWidth() / getHeight() : 0f;
+        return aspect > 1.0f && aspect < 1.5f;   // 4:3 = 1.33, Retroid Pocket Classic 1240x1080 = 1.15
+    }
+
+    private int previewStyle() {
+        return Math.max(0, Math.min(5, nget(29)));
+    }
+
+    private void layoutHoldQueue(int w, int h) {
+        layoutW = w;
+        layoutH = h;
+        int style = previewStyle();
+        layoutStyle = style;
+        float d = density;
+        landscape = w >= h;
+        if (!landscape) {
+            float underTop = gameY + gameH + 8f * d;
+            float underBottom = Math.min(dpadY - dpadR, aY - btnR) - 8f * d;
+            float uh = Math.max(28f * d, Math.min(56f * d, underBottom - underTop));
+            float topH = Math.max(30f * d, Math.min(56f * d, gameY - 16f * d));
+            float left = Math.max(8f * d, gameX);
+            float right = Math.min(w - 8f * d, gameX + gameW);
+            // Hold box: top left for layouts 1-2 (and Off), under the game on the
+            // left for 3 and 4 (3 gives the top bar to the queue).
+            if (style == 3 || style == 4) {
+                float hw = uh * 1.6f;
+                holdRect.set(left, underTop, left + hw, underTop + uh);
+            } else {
+                float hw = topH * 1.6f;
+                holdRect.set(left, 8f * d, left + hw, 8f * d + topH);
+            }
+            if (style == 1) {
+                float qw = uh * 1.6f;
+                float[] cxs = {w * 0.17f, w * 0.5f, w * 0.83f};
+                for (int i = 0; i < 3; i++) {
+                    queueRect[i].set(cxs[i] - qw / 2f, underTop, cxs[i] + qw / 2f, underTop + uh);
+                }
+            } else if (style == 2) {
+                float nw = Math.min(right - left, uh * 4.2f);
+                nextRect.set(w / 2f - nw / 2f, underTop, w / 2f + nw / 2f, underTop + uh);
+            } else if (style == 3) {
+                float nl = left;
+                float nr = quickLeft() - 8f * d;
+                nextRect.set(nl, 8f * d, Math.max(nl + 40f * d, nr), 8f * d + topH);
+            } else if (style == 4) {
+                float nw = Math.min(right - holdRect.right - 16f * d, uh * 3.6f);
+                nextRect.set(right - nw, underTop, right, underTop + uh);
+            }
+        } else {
+            float side = gameX;
+            float hw = Math.min(side - 16f * d, 110f * d), hh = hw / 1.6f;
+            holdRect.set((side - hw) / 2f, 12f * d, (side + hw) / 2f, 12f * d + hh);
+            float right0 = gameX + gameW;
+            float qw = Math.min(w - right0 - 16f * d, 96f * d), qh = qw / 1.6f;
+            float qTop = 8f * d + 46f * d + 12f * d;
+            float x0 = right0 + (w - right0 - qw) / 2f;
+            if (style == 1) {
+                for (int i = 0; i < 3; i++) {
+                    float y0 = qTop + i * (qh + 6f * d);
+                    queueRect[i].set(x0, y0, x0 + qw, y0 + qh);
+                }
+            } else {
+                float nh = Math.min(qw * 1.1f, aY - btnR - 12f * d - qTop);
+                nextRect.set(x0, qTop, x0 + qw, qTop + nh);
+            }
+        }
+    }
+
+    private float quickLeft() {
+        float d = density;
+        return getWidth() - 8f * d - 4 * 46f * d - 3 * 8f * d;
+    }
+
+    private int holdQueueSignature() {
+        int sig = nget(19) * 31 + nget(11) * 7 + (nget(12) + 2) * 131 + nget(28) * 5 + nget(13) * 17
+                + nget(4) * 1009 + nget(27) * 3 + nget(29) * 7919 + (nget(31) + 2) * 389;
+        for (int i = 0; i < 3; i++) sig = sig * 37 + (nget(14 + i) + 2);
+        return sig;
+    }
+
+    /** One block like the game's: black outline, piece colour, light top-left corner, darker edge. */
+    private void drawBlock(Canvas c, float l, float t, int s, int colour, float a) {
+        int al = (int) (255 * a) << 24;
+        int o = Math.max(1, Math.round(s / 8f)), hl = Math.max(1, Math.round(s / 5f));
+        int r = (colour >> 16) & 255, g = (colour >> 8) & 255, b = colour & 255;
+        int light = (Math.min(255, r + (255 - r) * 6 / 10) << 16) | (Math.min(255, g + (255 - g) * 6 / 10) << 8) | Math.min(255, b + (255 - b) * 6 / 10);
+        int dark = ((r * 7 / 10) << 16) | ((g * 7 / 10) << 8) | (b * 7 / 10);
+        fillR(c, l, t, l + s, t + s, al);
+        fillR(c, l + o, t + o, l + s - o, t + s - o, dark | al);
+        fillR(c, l + o, t + o, l + s - 2 * o, t + s - 2 * o, (colour & 0x00FFFFFF) | al);
+        fillR(c, l + o, t + o, l + o + hl, t + o + hl, light | al);
+    }
+
+    /** Draws a piece centred at (cx, cy); cells are drawn by us at whole screen pixels. */
+    private void drawPieceAt(Canvas c, float cx, float cy, float cell, int piece, boolean dim) {
+        if (piece < 0 || piece > 6) return;
+        String shape = (nget(27) != 0 ? SHAPES_SRS : SHAPES_DX)[piece];
+        int minC = 4, maxC = -1, minR = 2, maxR = -1;
+        for (int i = 0; i < 8; i++) {
+            if (shape.charAt(i) != '#') continue;
+            int r = i / 4, col = i % 4;
+            minC = Math.min(minC, col); maxC = Math.max(maxC, col);
+            minR = Math.min(minR, r); maxR = Math.max(maxR, r);
+        }
+        int cols = maxC - minC + 1, rows = maxR - minR + 1;
+        int cs = Math.max(4, Math.round(cell));
+        float ox = Math.round(cx - cols * cs / 2f), oy = Math.round(cy - rows * cs / 2f);
+        int colour = nget(20 + piece);
+        for (int i = 0; i < 8; i++) {
+            if (shape.charAt(i) != '#') continue;
+            drawBlock(c, ox + (i % 4 - minC) * cs, oy + (i / 4 - minR) * cs, cs, colour, dim ? 0.35f : 1f);
+        }
+    }
+
+    /** Box outline plus a small label at the top; returns the label height. */
+    private float drawBox(Canvas c, RectF box, String label) {
+        float d = density;
+        fillC(0xFF000000, 0.35f);
+        c.drawRoundRect(box, 8f * d, 8f * d, paint);
+        strokeC(OUTLINE, 0.8f, 1.5f * d);
+        c.drawRoundRect(box, 8f * d, 8f * d, paint);
+        float lh = Math.max(9f * d, Math.min(13f * d, box.height() * 0.2f));
+        if (label != null) {
+            // same pixel letters as the in-game box
+            float u = Math.max(2f, Math.round(lh * 0.62f / 5f));
+            drawPixelText(c, label, box.centerX(), box.top + lh * 0.35f, u, (LABEL & 0x00FFFFFF) | 0xFF000000);
+        }
+        return lh * 1.3f;
+    }
+
+    /** Layout 5: an opaque box over the game's NEXT window (game pixels
+     *  105-160 x 10-71, just above SCORE) with the next piece, the queue and the
+     *  held piece. */
+    // 3x5 pixel letters for the HOLD label, drawn in game pixels like the game's own text.
+    private static final String[] GLYPH_H = {"1.1", "1.1", "111", "1.1", "1.1"};
+    private static final String[] GLYPH_O = {"111", "1.1", "1.1", "1.1", "111"};
+    private static final String[] GLYPH_L = {"1..", "1..", "1..", "1..", "111"};
+    private static final String[] GLYPH_D = {"11.", "1.1", "1.1", "1.1", "11."};
+    private static final String[] GLYPH_N = {"1.1", "111", "111", "111", "1.1"};
+    private static final String[] GLYPH_E = {"111", "1..", "11.", "1..", "111"};
+    private static final String[] GLYPH_X = {"1.1", "1.1", ".1.", "1.1", "1.1"};
+    private static final String[] GLYPH_T = {"111", ".1.", ".1.", ".1.", ".1."};
+
+    /** Draws "HOLD" / "NEXT" in the pixel font, centred on cx, top at y, unit size u. */
+    private void drawPixelText(Canvas c, String s, float cx, float y, float u, int colour) {
+        String[][] w = new String[s.length()][];
+        for (int i = 0; i < s.length(); i++) {
+            switch (s.charAt(i)) {
+                case 'H': w[i] = GLYPH_H; break;
+                case 'O': w[i] = GLYPH_O; break;
+                case 'L': w[i] = GLYPH_L; break;
+                case 'D': w[i] = GLYPH_D; break;
+                case 'N': w[i] = GLYPH_N; break;
+                case 'E': w[i] = GLYPH_E; break;
+                case 'X': w[i] = GLYPH_X; break;
+                default:  w[i] = GLYPH_T; break;
+            }
+        }
+        drawPixelWord(c, w, Math.round(cx - (s.length() * 4 - 1) * u / 2f), Math.round(y), u, colour);
+    }
+
+    private int sampleOr(int x, int y, int fallback) {
+        int v = nativeSample(x, y);
+        return v == 0 ? fallback : v;
+    }
+
+    private void fillR(Canvas c, float l, float t, float r, float b, int color) {
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(color);
+        c.drawRect(l, t, r, b, paint);
+    }
+
+    /** The game's NEXT-window frame (black, red, yellow, white, blue studs) at game pixels l..r, t..b;
+     *  colours are read from the game picture so palettes and level colours carry over. */
+    private void drawFrameBox(Canvas c, float l, float t, float r, float bt, float px) {
+        int black = sampleOr(112, 40, 0xFF000000), red = sampleOr(150, 20, 0xFFFF0000),
+            yellow = sampleOr(150, 18, 0xFFFFFF00), white = sampleOr(120, 24, 0xFFFFFFFF),
+            blue = sampleOr(113, 18, 0xFF4A94D5);
+        fillR(c, l, t, r, bt, black);
+        fillR(c, l + px, t + px, r - px, bt - px, red);
+        fillR(c, l + 3f * px, t + 3f * px, r - 3f * px, bt - 3f * px, yellow);
+        fillR(c, l + 4f * px, t + 4f * px, r - 4f * px, bt - 4f * px, white);
+        float[][] corners = {{l, t}, {r - 4f * px, t}, {l, bt - 4f * px}, {r - 4f * px, bt - 4f * px}};
+        for (float[] k : corners) {
+            fillR(c, k[0], k[1], k[0] + 4f * px, k[1] + 4f * px, black);
+            fillR(c, k[0] + px, k[1] + px, k[0] + 3f * px, k[1] + 3f * px, blue);
+        }
+    }
+
+    private void drawPixelWord(Canvas c, String[][] word, float x0, float y0, float px, int colour) {
+        for (int g = 0; g < word.length; g++) {
+            for (int row = 0; row < 5; row++) {
+                for (int col = 0; col < 3; col++) {
+                    if (word[g][row].charAt(col) == '1') {
+                        float gx = x0 + (g * 4 + col) * px, gy = y0 + row * px;
+                        fillR(c, gx, gy, gx + px, gy + px, colour);
+                    }
+                }
+            }
+        }
+    }
+
+    /** The box over the game's NEXT window (layout "In game"). */
+    private void drawInGameBox(Canvas c, boolean showQueue) {
+        float px = gameW / 160f;
+        float l = gameX + 105f * px, t = gameY + 10f * px, r = gameX + 160f * px, bt = gameY + 71f * px;
+        int black = sampleOr(112, 40, 0xFF000000);
+        drawFrameBox(c, l, t, r, bt, px);
+        float cx = (l + r) / 2f;
+        drawPieceAt(c, cx, t + 11f * px, 6f * px, nget(31), false);
+        int n = showQueue ? Math.min(2, nget(13)) : 0;
+        for (int i = 0; i < n; i++) {
+            drawPieceAt(c, l + 4f * px + (r - l - 8f * px) * (i + 0.5f) / 2f, t + 26f * px, 5f * px, nget(14 + i), false);
+        }
+        if (nget(11) != 0) {
+            float labelY = showQueue ? 36f : 27f, pieceY = showQueue ? 51f : 45f, cell = showQueue ? 5f : 7f;
+            drawPixelWord(c, new String[][]{GLYPH_H, GLYPH_O, GLYPH_L, GLYPH_D}, cx - 7.5f * px, t + labelY * px, px, black);
+            drawPieceAt(c, cx, t + pieceY * px, cell * px, nget(12), nget(28) != 0);
+        }
+    }
+
+    private void drawHoldQueue(Canvas c) {
+        if (nget(19) == 0) return;          // not in a game
+        int style = previewStyle();
+        // 4:3 screens (e.g. Retroid Pocket Classic) have no room around the
+        // game, so Hold and the queue go in the box over the NEXT window.
+        boolean compact = isCompact();
+        if (style == 5 || (compact && (style != 0 || nget(11) != 0))) {
+            drawInGameBox(c, style != 0);
+            return;
+        }
+        if (style != layoutStyle || getWidth() != layoutW || getHeight() != layoutH) {
+            layoutHoldQueue(getWidth(), getHeight());
+        }
+        if (nget(11) != 0) {
+            float lh = drawBox(c, holdRect, "HOLD");
+            float cell = Math.min(holdRect.width() * 0.8f / 4f, (holdRect.height() - lh) * 0.75f / 2f);
+            drawPieceAt(c, holdRect.centerX(), holdRect.top + lh + (holdRect.height() - lh) / 2f,
+                    cell, nget(12), nget(28) != 0);
+        }
+        int n = Math.min(3, nget(13));
+        if (style == 0 || n <= 0) return;
+        if (style == 1) {
+            for (int i = 0; i < n; i++) {
+                RectF b = queueRect[i];
+                float lh = drawBox(c, b, i == 0 ? "NEXT" : null);
+                float cell = Math.min(b.width() * 0.8f / 4f, (b.height() - lh) * 0.75f / 2f);
+                drawPieceAt(c, b.centerX(), b.top + lh + (b.height() - lh) / 2f, cell, nget(14 + i), false);
+            }
+            return;
+        }
+        RectF b = nextRect;
+        float lh = drawBox(c, b, "NEXT");
+        if (landscape) {
+            float slot = (b.height() - lh) / 3f;
+            float cell = Math.min(b.width() * 0.7f / 4f, slot * 0.7f / 2f);
+            for (int i = 0; i < n; i++) {
+                drawPieceAt(c, b.centerX(), b.top + lh + slot * (i + 0.5f), cell, nget(14 + i), false);
+            }
+        } else {
+            float slot = b.width() / 3f;
+            float cell = Math.min(slot * 0.75f / 4f, (b.height() - lh) * 0.7f / 2f);
+            for (int i = 0; i < n; i++) {
+                drawPieceAt(c, b.left + slot * (i + 0.5f), b.top + lh + (b.height() - lh) / 2f,
+                        cell, nget(14 + i), false);
+            }
+        }
     }
 
     // ---------------------------- quick buttons (top right, Lemuroid style)
@@ -462,9 +790,12 @@ public class TouchControls extends View {
                 nset(6, nget(6) != 0 ? 0 : 1);
                 break;
             case Q_PALETTE: {
-                int p = (nget(4) + 1) % PALETTE_NAMES.length;
+                int pos = 0;
+                for (int k = 0; k < PALETTE_IDS.length; k++) if (PALETTE_IDS[k] == nget(4)) pos = k;
+                pos = (pos + 1) % PALETTE_IDS.length;
+                int p = PALETTE_IDS[pos];
                 nset(4, p);
-                showCard("PALETTE", PALETTE_NAMES[p], p, PALETTE_NAMES.length);
+                showCard("PALETTE", PALETTE_NAMES[p], pos, PALETTE_IDS.length);
                 break;
             }
             case Q_SCAN: {
@@ -604,11 +935,12 @@ public class TouchControls extends View {
 
     // -------------------- PATCHES card: the main menu (same style as DKC STATES)
 
-    private static final String[] PATCH_NAMES = {"Hard Drop", "Ghost Piece", "Don't Panic", "Skip Celebrations", "Korobeiniki", "SRS Rotation", "Randomizer"};
-    private static final int NT = 7;  // tiles: two columns (an odd last one is full width)
+    private static final String[] KORO_NAMES = {"Off", "Original", "Plus"};
+    private static final String[] PATCH_NAMES = {"Hard Drop", "Ghost Piece", "Don't Panic", "Skip Celebrations", "Korobeiniki", "SRS Rotation", "Randomizer", "Hold", "Preview", "Lock Delay"};
+    private static final int NT = 10;  // tiles: two columns (an odd last one is full width)
     private final RectF patchesCard = new RectF();
-    private final RectF[] tileRect = {new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF()};
-    private int sel = 0;              // tile 0-6
+    private final RectF[] tileRect = {new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF()};
+    private int sel = 0;              // tile 0-9
     private boolean navActive = false; // gamepad in use on the card: show the hint line
     private int touchItem = -1;
     private boolean touchOutside = false;
@@ -626,10 +958,17 @@ public class TouchControls extends View {
             case 0: return nget(0) != 0 ? "On" : "Off";
             case 1: return GHOST_NAMES[Math.max(0, Math.min(2, nget(1)))];
             case 2: return nget(2) != 0 ? "On" : "Off";
-            case 3: return nget(3) != 0 ? "On" : "Off";
-            case 4: return nget(8) != 0 ? "On" : "Off";
+            case 3: return SKIP_NAMES[Math.max(0, Math.min(2, nget(3)))];
+            case 4: return KORO_NAMES[Math.max(0, Math.min(2, nget(8)))];
             case 5: return nget(9) != 0 ? "On" : "Off";
-            default: return RAND_NAMES[Math.max(0, Math.min(2, nget(10)))];
+            case 6: return RAND_NAMES[Math.max(0, Math.min(2, nget(10)))];
+            case 7: return nget(11) != 0 ? "On" : "Off";
+            case 8: {
+                int p = previewStyle();
+                if (isCompact() && p != 0) p = 5;
+                return p == 0 ? "Off" : (p == 5 ? "In game" : "Layout " + p);
+            }
+            default: return nget(30) != 0 ? "On" : "Off";
         }
     }
 
@@ -638,10 +977,13 @@ public class TouchControls extends View {
             case 0: nset(0, nget(0) != 0 ? 0 : 1); break;
             case 1: nset(1, (nget(1) + 1) % 3); break;
             case 2: nset(2, nget(2) != 0 ? 0 : 1); break;
-            case 3: nset(3, nget(3) != 0 ? 0 : 1); break;
-            case 4: nset(8, nget(8) != 0 ? 0 : 1); break;
+            case 3: nset(3, (nget(3) + 1) % 3); break;
+            case 4: nset(8, (nget(8) + 1) % 3); break;
             case 5: nset(9, nget(9) != 0 ? 0 : 1); break;
             case 6: nset(10, (nget(10) + 1) % 3); break;
+            case 7: nset(11, nget(11) != 0 ? 0 : 1); break;
+            case 8: nset(29, isCompact() ? (previewStyle() == 0 ? 5 : 0) : (previewStyle() + 1) % 6); break;
+            case 9: nset(30, nget(30) != 0 ? 0 : 1); break;
             default: return;
         }
         buzz();
@@ -719,6 +1061,31 @@ public class TouchControls extends View {
                 c.drawCircle(cx, cy, dot, paint);
                 c.drawCircle(cx + o, cy + o, dot, paint);
                 paint.setStyle(Paint.Style.STROKE);
+                break;
+            }
+            case 7: { // hold: a box with a small piece inside
+                float r = s * 0.9f;
+                c.drawRoundRect(cx - r, cy - r * 0.75f, cx + r, cy + r * 0.75f, r * 0.2f, r * 0.2f, paint);
+                paint.setStyle(Paint.Style.FILL);
+                float q = r * 0.34f;
+                c.drawRect(cx - 1.5f * q, cy, cx + 1.5f * q, cy + q * 0.9f, paint);
+                c.drawRect(cx - 0.5f * q, cy - q, cx + 0.5f * q, cy, paint);
+                paint.setStyle(Paint.Style.STROKE);
+                break;
+            }
+            case 8: { // preview: three small stacked bars
+                float r = s * 0.85f;
+                for (int k = 0; k < 3; k++) {
+                    float y = cy - r * 0.7f + k * r * 0.7f;
+                    c.drawRect(cx - r * 0.6f, y - r * 0.18f, cx + r * 0.6f, y + r * 0.18f, paint);
+                }
+                break;
+            }
+            case 9: { // lock delay: a clock face
+                float r = s * 0.85f;
+                c.drawCircle(cx, cy, r, paint);
+                c.drawLine(cx, cy, cx, cy - r * 0.6f, paint);
+                c.drawLine(cx, cy, cx + r * 0.45f, cy + r * 0.2f, paint);
                 break;
             }
             case 3: // skip celebrations: skip-to-end
@@ -893,6 +1260,14 @@ public class TouchControls extends View {
             return;
         }
         float slop = 10 * density;
+        if (holdButtonShown()) {
+            float hs = 6 * density;
+            if (x >= holdBtnRect.left - hs && x <= holdBtnRect.right + hs
+                    && y >= holdBtnRect.top - hs && y <= holdBtnRect.bottom + hs) {
+                holdBtnHit = true;
+                return;
+            }
+        }
         if (x >= selectRect.left - slop && x <= selectRect.right + slop
                 && y >= selectRect.top - slop && y <= selectRect.bottom + slop) {
             out[SELECT] = true;
@@ -914,19 +1289,16 @@ public class TouchControls extends View {
             if (action == MotionEvent.ACTION_DOWN) releaseAll();
             return patchesTouch(e);
         }
-        // ImGui list page (Controls, Credits): every touch goes to the game's menu.
-        if (page > 0) {
-            if (action == MotionEvent.ACTION_DOWN) releaseAll();
-            return false;
-        }
 
         if (action == MotionEvent.ACTION_DOWN) {
             qTouched = SystemClock.uptimeMillis();
             if (gamepadMode) setGamepadMode(false);
         }
         if (quickTouch(e)) return true;
+        if (controllerPresent) return true;     // with a controller only the quick buttons are touch-operated
 
         boolean[] now = new boolean[COUNT];
+        holdBtnHit = false;
         if (action != MotionEvent.ACTION_CANCEL) {
             int skip = (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_POINTER_UP)
                     ? e.getActionIndex() : -1;
@@ -936,6 +1308,28 @@ public class TouchControls extends View {
             }
         }
         apply(now);
+        if (holdBtnHit != holdBtnDown) {
+            holdBtnDown = holdBtnHit;
+            if (holdBtnDown) {
+                nreq(REQ_HOLD);
+                buzz();
+            }
+            invalidate();
+        }
+        return true;
+    }
+
+    private boolean holdButtonShown() {
+        return nget(11) != 0;
+    }
+
+    /** L1 / R1 on a controller hold the piece while Hold is on and a game is
+     *  being played. Returns true if the key was used. */
+    public boolean holdKey(KeyEvent e) {
+        int code = e.getKeyCode();
+        if (code != KeyEvent.KEYCODE_BUTTON_L1 && code != KeyEvent.KEYCODE_BUTTON_R1) return false;
+        if (nget(11) == 0 || nget(19) == 0 || menuPage() >= 0) return false;
+        if (e.getAction() == KeyEvent.ACTION_DOWN && e.getRepeatCount() == 0) nreq(REQ_HOLD);
         return true;
     }
 
