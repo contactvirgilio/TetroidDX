@@ -32,6 +32,10 @@ its original code.
 <img src="screenshots/in-game-box-4x3.png" width="31%" alt="In game box for 4:3 screens">
 </p>
 
+On a 4:3 handheld (Retroid Pocket Classic):
+
+<img src="screenshots/retroid-4x3.png" width="48%" alt="In game box on a 4:3 screen">
+
 ## Controls
 - Touch: on-screen buttons, with quick buttons on top (Mute, Palette, Scanlines, Menu).
 - Controller: the touch game buttons hide; D-pad or left stick moves in the
