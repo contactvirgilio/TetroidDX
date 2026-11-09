@@ -73,8 +73,6 @@ You need the ROM **Tetris DX (World) (SGB Enhanced).gbc** (No-Intro, CRC32
 5. Install it and pick your ROM when the app asks. It is checked against the
    ROM the build was made from.
 
-Requires Android 8 or newer (arm64). The APK is not published here.
-
 ## Repository layout
 
 - `.github/workflows/android.yml`: the whole build (ROM checks, patching,
