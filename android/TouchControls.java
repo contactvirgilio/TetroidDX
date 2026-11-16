@@ -1,12 +1,15 @@
 package org.tetrisdx.recomp;
 
 import android.content.Context;
+import android.content.res.AssetFileDescriptor;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
 import android.graphics.Typeface;
+import android.media.AudioAttributes;
+import android.media.SoundPool;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
@@ -30,7 +33,7 @@ import org.libsdl.app.SDLActivity;
  *   paused while it is open;
  * - the hold box and the piece queue, and the HOLD button.
  */
-public class TouchControls extends View {
+public class TouchControls extends TouchEffects {
 
     static native boolean nativeMenuOpen();
     static native boolean nativeHardDropOn();
@@ -39,7 +42,7 @@ public class TouchControls extends View {
      *  8 Korobeiniki, 9 SRS, 10 Randomizer (0 DX, 1 7-Bag, 2 35-Bag), 11 Hold;
      *  read only: 12 held piece (-1 none), 13 queue length, 14-18 queue,
      *  19 in play, 20-26 piece colours (ARGB), 27 SRS on, 28 hold used,
-     *  29 preview (0 off, 1-4 layout), 30 Lock Delay. */
+     *  29 preview (0 off, 1-4 layout), 30 Lock Delay, 32 Announcer, 33 Tetris event counter, 34 its kind. */
     static native int nativeGet(int id);
     static native void nativeSet(int id, int value);
     /** The game's own picture of piece t (32 x 16 ARGB, 4 x 2 tiles in its spawn
@@ -49,61 +52,48 @@ public class TouchControls extends View {
     /** bits: 1 open the PATCHES card, 2 close, 4 Controls page, 8 Credits page. */
     static native void nativeRequest(int bits);
 
-    private static final int REQ_OPEN = 1, REQ_CLOSE = 2, REQ_HOLD = 32;
+    static final int REQ_OPEN = 1, REQ_CLOSE = 2, REQ_HOLD = 32;
 
-    private static final int UP = 0, DOWN = 1, LEFT = 2, RIGHT = 3,
-            A = 4, B = 5, SELECT = 6, START = 7, COUNT = 8;
-
-    private static final int[] KEYCODES = {
+    static final int[] KEYCODES = {
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
             KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
             KeyEvent.KEYCODE_Z, KeyEvent.KEYCODE_X,
             KeyEvent.KEYCODE_DEL, KeyEvent.KEYCODE_ENTER,
     };
 
-    private static final int OUTLINE = 0xFF8A8A8A;
-    private static final int FILL = 0x808A8A8A;
-    private static final int LABEL = 0xFFBDBDBD;
+    static final int OUTLINE = 0xFF8A8A8A;
+    static final int FILL = 0x808A8A8A;
+    static final int LABEL = 0xFFBDBDBD;
     // A and B in the original Game Boy's wine red.
-    private static final int WINE = 0xFF8C2148;
-    private static final int WINE_LABEL = 0xFFF2DCE4;
+    static final int WINE = 0xFF8C2148;
+    static final int WINE_LABEL = 0xFFF2DCE4;
 
-    private static final String[] GHOST_NAMES = {"Off", "Light", "Dark"};
-    private static final String[] SKIP_NAMES = {"Off", "Always", "Start skips"};
-    private static final String[] RAND_NAMES = {"Tetris DX", "7-Bag", "35-Bag"};
+    static final String[] GHOST_NAMES = {"Off", "Wireframe", "Wireframe", "Dark", "Shadow"};   // by native value; 1 is no longer used
+    static final String[] SKIP_NAMES = {"Off", "Always", "Start skips"};
+    static final String[] RAND_NAMES = {"Tetris DX", "7-Bag", "35-Bag"};
     // Pastel (2), Sunset (4) and Graphite (8) were removed; the ids stay so saved settings still line up.
-    private static final int[] PALETTE_IDS = {0, 1, 3, 5, 6, 7};
-    private static final String[] PALETTE_NAMES = {"Original", "GBC LCD", "Pastel", "Swamp", "Sunset", "Guideline", "Sega", "Amber Night", "Graphite"};
+    static final int[] PALETTE_IDS = {0, 1, 3, 5, 6, 7};
+    static final String[] PALETTE_NAMES = {"Original", "GBC LCD", "Pastel", "Swamp", "Sunset", "Guideline", "Sega", "Amber Night", "Graphite"};
 
-    private final boolean[] pressed = new boolean[COUNT];
-    private final Paint stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Path path = new Path();
-    private final Handler handler = new Handler(Looper.getMainLooper());
-    private final float density;
-
-
-    private static TouchControls instance;   // for the centre card, posted from native code
-    private boolean menuOpen = false;     // the PATCHES card is open
-    private boolean hardDropOn = false;
-    private boolean gamepadMode = false;
-    private boolean controllerPresent = false;   // a physical controller is connected: no touch controls at all
-    private int lastPage = -1;
+    static TouchControls instance;   // for the centre card, posted from native code
+    boolean menuOpen = false;     // the PATCHES card is open
+    boolean hardDropOn = false;
+    boolean gamepadMode = false;
+    boolean controllerPresent = false;   // a physical controller is connected: no touch controls at all
+    int lastPage = -1;
 
     // Layout, recomputed in onSizeChanged.
-    private float dpadX, dpadY, dpadR;
-    private float aX, aY, bX, bY, btnR;
-    private final RectF selectRect = new RectF(), startRect = new RectF();
+    float dpadX, dpadY, dpadR;
+    float aX, aY, bX, bY, btnR;
+    final RectF selectRect = new RectF(), startRect = new RectF();
     /** Touch Hold button (shown while Hold is on): a pill just above Select and
      *  Start in portrait, above Start in landscape. Presses go to native code. */
-    private final RectF holdBtnRect = new RectF();
-    private boolean holdBtnDown = false;
-    private boolean holdBtnHit = false;
-    private final Path dpadPath = new Path();
+    final RectF holdBtnRect = new RectF();
+    boolean holdBtnDown = false;
+    boolean holdBtnHit = false;
+    final Path dpadPath = new Path();
 
-    private final Runnable poll = new Runnable() {
+    final Runnable poll = new Runnable() {
         @Override
         public void run() {
             int page = menuPage();
@@ -111,6 +101,7 @@ public class TouchControls extends View {
                 hardDropOn = nativeHardDropOn();
             } catch (Throwable ignored) {
             }
+            tetrisVoicePoll();
             int sig = holdQueueSignature();
             if (sig != lastHqSig) {
                 lastHqSig = sig;
@@ -147,43 +138,15 @@ public class TouchControls extends View {
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
         handler.post(poll);
+        initVoice();
     }
 
     @Override
     protected void onDetachedFromWindow() {
         handler.removeCallbacks(poll);
+        if (voicePool != null) { voicePool.release(); voicePool = null; }
         releaseAll();
         super.onDetachedFromWindow();
-    }
-
-    private static int menuPage() {
-        try {
-            return nativeGet(7);
-        } catch (Throwable t) {
-            return -1;
-        }
-    }
-
-    private static int nget(int id) {
-        try {
-            return nativeGet(id);
-        } catch (Throwable t) {
-            return 0;
-        }
-    }
-
-    private static void nset(int id, int v) {
-        try {
-            nativeSet(id, v);
-        } catch (Throwable ignored) {
-        }
-    }
-
-    private static void nreq(int bits) {
-        try {
-            nativeRequest(bits);
-        } catch (Throwable ignored) {
-        }
     }
 
     /** With a controller connected the game buttons (D-pad, A/B, Start/Select, Hold) are never
@@ -210,7 +173,7 @@ public class TouchControls extends View {
         invalidate();
     }
 
-    private void buzz() {
+    void buzz() {
         performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
     }
 
@@ -312,7 +275,13 @@ public class TouchControls extends View {
         }
         if (page >= 0) return;    // closing: nothing on top
         if (!gamepadMode && !controllerPresent) drawPad(c);
+        fireBoxDrawn = false;
+        anyBoxDrawn = false;
         drawHoldQueue(c);
+        if (!anyBoxDrawn && nget(19) != 0) flashNextFrame(c);   // Hold and previews off: the game's own NEXT frame gets a quiet flash
+        drawVanillaFlower(c);
+        drawGuidelineText(c);
+        drawEffect(c);
         drawQuick(c);                       // Mute / Palette / Scanlines / Menu stay
         drawCard(c);
         // keep the fade and the cards moving
@@ -320,7 +289,7 @@ public class TouchControls extends View {
         else postInvalidateDelayed(500);
     }
 
-    private void drawPad(Canvas c) {
+    void drawPad(Canvas c) {
         // D-pad: light only the pressed arm(s).
         float arm = dpadR * 0.33f;
         if (pressed[UP]) c.drawRect(dpadX - arm, dpadY - dpadR, dpadX + arm, dpadY - arm, fill);
@@ -359,23 +328,22 @@ public class TouchControls extends View {
         }
     }
 
-    private void drawLabel(Canvas c, String s, float x, float y) {
+    void drawLabel(Canvas c, String s, float x, float y) {
         Paint.FontMetrics fm = text.getFontMetrics();
         c.drawText(s, x, y - (fm.ascent + fm.descent) / 2f, text);
     }
 
-
     // ------------------------------------------------- shared drawing helpers
 
-    private static final int YELLOW = 0xFFFFC107;
+    static final int YELLOW = 0xFFFFC107;
 
-    private void fillC(int color, float a) {
+    void fillC(int color, float a) {
         paint.setStyle(Paint.Style.FILL);
         paint.setColor(color);
         paint.setAlpha((int) (android.graphics.Color.alpha(color) * a));
     }
 
-    private void strokeC(int color, float a, float w) {
+    void strokeC(int color, float a, float w) {
         paint.setStyle(Paint.Style.STROKE);
         paint.setStrokeWidth(w);
         paint.setStrokeCap(Paint.Cap.ROUND);
@@ -384,7 +352,7 @@ public class TouchControls extends View {
         paint.setAlpha((int) (android.graphics.Color.alpha(color) * a));
     }
 
-    private void textC(Canvas c, String t, float cx, float cy, float size, int color, float a,
+    void textC(Canvas c, String t, float cx, float cy, float size, int color, float a,
                        Typeface face) {
         paint.setStyle(Paint.Style.FILL);
         paint.setColor(color);
@@ -399,31 +367,9 @@ public class TouchControls extends View {
 
     // ------------------------------------------------ hold box and piece queue
 
-    // Shapes in their spawn orientation, 4 x 2 cells ("#" = block), by piece
-    // number (0 I, 1 T, 2 Z, 3 S, 4 J, 5 L, 6 O). DX shows T, J and L flat side
-    // up; with SRS on they spawn flat side down.
-    private static final String[] SHAPES_DX = {
-            "....####", "###..#..", "##...##.", ".##.##..", "###...#.", "###.#...", ".##..##."};
-    private static final String[] SHAPES_SRS = {
-            "....####", ".#..###.", "##...##.", ".##.##..", "#...###.", "..#.###.", ".##..##."};
-    private float gameX, gameY, gameW, gameH;
-    private final RectF holdRect = new RectF();
-    private final RectF[] queueRect = {new RectF(), new RectF(), new RectF()};
-    private final RectF nextRect = new RectF();   // one box holding all three
-    private boolean landscape = false;
-    private int layoutW, layoutH, layoutStyle = -1;
-    private int lastHqSig = 0;
-    private final Bitmap[] pieceBmp = new Bitmap[7];
-    private final int[] pieceBuf = new int[32 * 16];
-    private long pieceBmpTime = 0;
-    private int pieceBmpSig = 0;
-    private final android.graphics.Rect bmpSrc = new android.graphics.Rect();
-    private final RectF bmpDst = new RectF();
-    private final Paint bmpPaint = new Paint();   // no filtering: sharp pixels
-
     /** The game's own piece picture, refreshed when the palette or rotation
      *  system changes and every half second (null until a game has drawn it). */
-    private Bitmap pieceBitmap(int t) {
+    Bitmap pieceBitmap(int t) {
         long now = SystemClock.uptimeMillis();
         int sig = nget(4) * 3 + nget(27);
         if (sig != pieceBmpSig || now - pieceBmpTime > 500) {
@@ -448,21 +394,7 @@ public class TouchControls extends View {
         return pieceBmp[t];
     }
 
-    /** Preview setting (native id 29): 0 off, 1-5 layout. In landscape, layout 1
-     *  stacks three boxes down the right margin and 2-4 use one box there.
-     *  Layout 5 draws inside the game screen, over the game's NEXT window, so it
-     *  also works where there is no room around the game (RPC). */
-    /** 4:3 screens (e.g. Retroid Pocket Classic): only Preview Off / In game make sense. */
-    private boolean isCompact() {
-        float aspect = getHeight() > 0 ? (float) getWidth() / getHeight() : 0f;
-        return aspect > 1.0f && aspect < 1.5f;   // 4:3 = 1.33, Retroid Pocket Classic 1240x1080 = 1.15
-    }
-
-    private int previewStyle() {
-        return Math.max(0, Math.min(5, nget(29)));
-    }
-
-    private void layoutHoldQueue(int w, int h) {
+    void layoutHoldQueue(int w, int h) {
         layoutW = w;
         layoutH = h;
         int style = previewStyle();
@@ -522,20 +454,18 @@ public class TouchControls extends View {
         }
     }
 
-    private float quickLeft() {
+    float quickLeft() {
         float d = density;
         return getWidth() - 8f * d - 4 * 46f * d - 3 * 8f * d;
     }
 
-    private int holdQueueSignature() {
-        int sig = nget(19) * 31 + nget(11) * 7 + (nget(12) + 2) * 131 + nget(28) * 5 + nget(13) * 17
-                + nget(4) * 1009 + nget(27) * 3 + nget(29) * 7919 + (nget(31) + 2) * 389;
-        for (int i = 0; i < 3; i++) sig = sig * 37 + (nget(14 + i) + 2);
-        return sig;
+    /** One number from native code that changes when anything the Hold / Next boxes show changes. */
+    int holdQueueSignature() {
+        return nget(47);
     }
 
     /** One block like the game's: black outline, piece colour, light top-left corner, darker edge. */
-    private void drawBlock(Canvas c, float l, float t, int s, int colour, float a) {
+    void drawBlock(Canvas c, float l, float t, int s, int colour, float a) {
         int al = (int) (255 * a) << 24;
         int o = Math.max(1, Math.round(s / 8f)), hl = Math.max(1, Math.round(s / 5f));
         int r = (colour >> 16) & 255, g = (colour >> 8) & 255, b = colour & 255;
@@ -548,7 +478,7 @@ public class TouchControls extends View {
     }
 
     /** Draws a piece centred at (cx, cy); cells are drawn by us at whole screen pixels. */
-    private void drawPieceAt(Canvas c, float cx, float cy, float cell, int piece, boolean dim) {
+    void drawPieceAt(Canvas c, float cx, float cy, float cell, int piece, boolean dim) {
         if (piece < 0 || piece > 6) return;
         String shape = (nget(27) != 0 ? SHAPES_SRS : SHAPES_DX)[piece];
         int minC = 4, maxC = -1, minR = 2, maxR = -1;
@@ -568,8 +498,7 @@ public class TouchControls extends View {
         }
     }
 
-    /** Box outline plus a small label at the top; returns the label height. */
-    private float drawBox(Canvas c, RectF box, String label) {
+    float drawBox(Canvas c, RectF box, String label) {
         float d = density;
         fillC(0xFF000000, 0.35f);
         c.drawRoundRect(box, 8f * d, 8f * d, paint);
@@ -581,6 +510,13 @@ public class TouchControls extends View {
             float u = Math.max(2f, Math.round(lh * 0.62f / 5f));
             drawPixelText(c, label, box.centerX(), box.top + lh * 0.35f, u, (LABEL & 0x00FFFFFF) | 0xFF000000);
         }
+        float fl = flashLevel();
+        if (fl > 0f) {
+            fillC(flashColor(0), 0.7f * fl);
+            c.drawRoundRect(box, 8f * d, 8f * d, paint);
+        }
+        if (isLineFx()) lineFx(c, box.left, box.top, box.right, box.bottom);
+        fireOnBox(c, box.left, box.top, box.right, box.bottom, Math.max(2f, Math.round(1.5f * d)));
         return lh * 1.3f;
     }
 
@@ -588,17 +524,17 @@ public class TouchControls extends View {
      *  105-160 x 10-71, just above SCORE) with the next piece, the queue and the
      *  held piece. */
     // 3x5 pixel letters for the HOLD label, drawn in game pixels like the game's own text.
-    private static final String[] GLYPH_H = {"1.1", "1.1", "111", "1.1", "1.1"};
-    private static final String[] GLYPH_O = {"111", "1.1", "1.1", "1.1", "111"};
-    private static final String[] GLYPH_L = {"1..", "1..", "1..", "1..", "111"};
-    private static final String[] GLYPH_D = {"11.", "1.1", "1.1", "1.1", "11."};
-    private static final String[] GLYPH_N = {"1.1", "111", "111", "111", "1.1"};
-    private static final String[] GLYPH_E = {"111", "1..", "11.", "1..", "111"};
-    private static final String[] GLYPH_X = {"1.1", "1.1", ".1.", "1.1", "1.1"};
-    private static final String[] GLYPH_T = {"111", ".1.", ".1.", ".1.", ".1."};
+    static final String[] GLYPH_H = {"1.1", "1.1", "111", "1.1", "1.1"};
+    static final String[] GLYPH_O = {"111", "1.1", "1.1", "1.1", "111"};
+    static final String[] GLYPH_L = {"1..", "1..", "1..", "1..", "111"};
+    static final String[] GLYPH_D = {"11.", "1.1", "1.1", "1.1", "11."};
+    static final String[] GLYPH_N = {"1.1", "111", "111", "111", "1.1"};
+    static final String[] GLYPH_E = {"111", "1..", "11.", "1..", "111"};
+    static final String[] GLYPH_X = {"1.1", "1.1", ".1.", "1.1", "1.1"};
+    static final String[] GLYPH_T = {"111", ".1.", ".1.", ".1.", ".1."};
 
     /** Draws "HOLD" / "NEXT" in the pixel font, centred on cx, top at y, unit size u. */
-    private void drawPixelText(Canvas c, String s, float cx, float y, float u, int colour) {
+    void drawPixelText(Canvas c, String s, float cx, float y, float u, int colour) {
         String[][] w = new String[s.length()][];
         for (int i = 0; i < s.length(); i++) {
             switch (s.charAt(i)) {
@@ -615,49 +551,8 @@ public class TouchControls extends View {
         drawPixelWord(c, w, Math.round(cx - (s.length() * 4 - 1) * u / 2f), Math.round(y), u, colour);
     }
 
-    private int sampleOr(int x, int y, int fallback) {
-        int v = nativeSample(x, y);
-        return v == 0 ? fallback : v;
-    }
-
-    private void fillR(Canvas c, float l, float t, float r, float b, int color) {
-        paint.setStyle(Paint.Style.FILL);
-        paint.setColor(color);
-        c.drawRect(l, t, r, b, paint);
-    }
-
-    /** The game's NEXT-window frame (black, red, yellow, white, blue studs) at game pixels l..r, t..b;
-     *  colours are read from the game picture so palettes and level colours carry over. */
-    private void drawFrameBox(Canvas c, float l, float t, float r, float bt, float px) {
-        int black = sampleOr(112, 40, 0xFF000000), red = sampleOr(150, 20, 0xFFFF0000),
-            yellow = sampleOr(150, 18, 0xFFFFFF00), white = sampleOr(120, 24, 0xFFFFFFFF),
-            blue = sampleOr(113, 18, 0xFF4A94D5);
-        fillR(c, l, t, r, bt, black);
-        fillR(c, l + px, t + px, r - px, bt - px, red);
-        fillR(c, l + 3f * px, t + 3f * px, r - 3f * px, bt - 3f * px, yellow);
-        fillR(c, l + 4f * px, t + 4f * px, r - 4f * px, bt - 4f * px, white);
-        float[][] corners = {{l, t}, {r - 4f * px, t}, {l, bt - 4f * px}, {r - 4f * px, bt - 4f * px}};
-        for (float[] k : corners) {
-            fillR(c, k[0], k[1], k[0] + 4f * px, k[1] + 4f * px, black);
-            fillR(c, k[0] + px, k[1] + px, k[0] + 3f * px, k[1] + 3f * px, blue);
-        }
-    }
-
-    private void drawPixelWord(Canvas c, String[][] word, float x0, float y0, float px, int colour) {
-        for (int g = 0; g < word.length; g++) {
-            for (int row = 0; row < 5; row++) {
-                for (int col = 0; col < 3; col++) {
-                    if (word[g][row].charAt(col) == '1') {
-                        float gx = x0 + (g * 4 + col) * px, gy = y0 + row * px;
-                        fillR(c, gx, gy, gx + px, gy + px, colour);
-                    }
-                }
-            }
-        }
-    }
-
     /** The box over the game's NEXT window (layout "In game"). */
-    private void drawInGameBox(Canvas c, boolean showQueue) {
+    void drawInGameBox(Canvas c, boolean showQueue) {
         float px = gameW / 160f;
         float l = gameX + 105f * px, t = gameY + 10f * px, r = gameX + 160f * px, bt = gameY + 71f * px;
         int black = sampleOr(112, 40, 0xFF000000);
@@ -673,9 +568,11 @@ public class TouchControls extends View {
             drawPixelWord(c, new String[][]{GLYPH_H, GLYPH_O, GLYPH_L, GLYPH_D}, cx - 7.5f * px, t + labelY * px, px, black);
             drawPieceAt(c, cx, t + pieceY * px, cell * px, nget(12), nget(28) != 0);
         }
+        flashFrame(c, l, t, r, bt, px);
+        fireOnBox(c, l, t, r, bt, px);
     }
 
-    private void drawHoldQueue(Canvas c) {
+    void drawHoldQueue(Canvas c) {
         if (nget(19) == 0) return;          // not in a game
         int style = previewStyle();
         // 4:3 screens (e.g. Retroid Pocket Classic) have no room around the
@@ -725,12 +622,12 @@ public class TouchControls extends View {
 
     // ---------------------------- quick buttons (top right, Lemuroid style)
 
-    private static final int Q_MUTE = 0, Q_PALETTE = 1, Q_SCAN = 2, Q_MENU = 3, Q_N = 4;
-    private final RectF[] qRect = {new RectF(), new RectF(), new RectF(), new RectF()};
-    private long qTouched = SystemClock.uptimeMillis();
-    private int qDown = -1;
+    static final int Q_MUTE = 0, Q_PALETTE = 1, Q_SCAN = 2, Q_MENU = 3, Q_N = 4;
+    final RectF[] qRect = {new RectF(), new RectF(), new RectF(), new RectF()};
+    long qTouched = SystemClock.uptimeMillis();
+    int qDown = -1;
 
-    private void layoutQuick(int w) {
+    void layoutQuick(int w) {
         float d = density, sz = 46f * d, gap = 8f * d, m = 8f * d;
         float x = w - m;
         for (int i = Q_N - 1; i >= 0; i--) {
@@ -739,7 +636,7 @@ public class TouchControls extends View {
         }
     }
 
-    private int quickHit(float x, float y) {
+    int quickHit(float x, float y) {
         float s = 2f * density;
         for (int i = 0; i < Q_N; i++) {
             RectF r = qRect[i];
@@ -749,19 +646,19 @@ public class TouchControls extends View {
     }
 
     // buttons fade to 30% after 15 seconds; any touch brings them back
-    private float quickAlpha() {
+    float quickAlpha() {
         long dt = SystemClock.uptimeMillis() - qTouched;
         if (dt < 15000) return 1f;
         if (dt < 15600) return 1f - 0.7f * (dt - 15000) / 600f;
         return 0.3f;
     }
 
-    private boolean quickFading() {
+    boolean quickFading() {
         long dt = SystemClock.uptimeMillis() - qTouched;
         return dt > 14900 && dt < 15700;
     }
 
-    private boolean quickTouch(MotionEvent e) {
+    boolean quickTouch(MotionEvent e) {
         int a = e.getActionMasked();
         if (a == MotionEvent.ACTION_DOWN) {
             int i = quickHit(e.getX(), e.getY());
@@ -784,7 +681,7 @@ public class TouchControls extends View {
         return true;
     }
 
-    private void quickAct(int i) {
+    void quickAct(int i) {
         switch (i) {
             case Q_MUTE:
                 nset(6, nget(6) != 0 ? 0 : 1);
@@ -812,7 +709,7 @@ public class TouchControls extends View {
         invalidate();
     }
 
-    private void drawQuick(Canvas c) {
+    void drawQuick(Canvas c) {
         float a = quickAlpha(), d = density;
         boolean mute = nget(6) != 0;
         for (int i = 0; i < Q_N; i++) {
@@ -870,11 +767,11 @@ public class TouchControls extends View {
 
     // ------------------------- centre feedback card (title, value, bars)
 
-    private String cardTitle = null, cardValue = "";
-    private int cardIndex = 0, cardCount = 0;
-    private long cardAt = 0;
+    String cardTitle = null, cardValue = "";
+    int cardIndex = 0, cardCount = 0;
+    long cardAt = 0;
 
-    private void showCard(String title, String value, int index, int count) {
+    void showCard(String title, String value, int index, int count) {
         cardTitle = title;
         cardValue = value;
         cardIndex = index;
@@ -890,7 +787,7 @@ public class TouchControls extends View {
         v.post(() -> v.showCard(title, value, index, count));
     }
 
-    private void drawCard(Canvas c) {
+    void drawCard(Canvas c) {
         if (cardTitle == null) return;
         long dt = SystemClock.uptimeMillis() - cardAt;
         if (dt > 1200) {
@@ -935,28 +832,28 @@ public class TouchControls extends View {
 
     // -------------------- PATCHES card: the main menu (same style as DKC STATES)
 
-    private static final String[] KORO_NAMES = {"Off", "Original", "Plus"};
-    private static final String[] PATCH_NAMES = {"Hard Drop", "Ghost Piece", "Don't Panic", "Skip Celebrations", "Korobeiniki", "SRS Rotation", "Randomizer", "Hold", "Preview", "Lock Delay"};
-    private static final int NT = 10;  // tiles: two columns (an odd last one is full width)
-    private final RectF patchesCard = new RectF();
-    private final RectF[] tileRect = {new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF()};
-    private int sel = 0;              // tile 0-9
-    private boolean navActive = false; // gamepad in use on the card: show the hint line
-    private int touchItem = -1;
-    private boolean touchOutside = false;
-    private long closingAt = 0;
+    static final String[] KORO_NAMES = {"Off", "Original", "Plus"};
+    static final String[] PATCH_NAMES = {"Hard Drop", "Ghost Piece", "Don't Panic", "Skip Celebrations", "Korobeiniki", "SRS Rotation", "Randomizer", "Hold", "Preview", "Lock Delay", "Announcer"};
+    static final int NT = 11;  // tiles: two columns (an odd last one is full width)
+    final RectF patchesCard = new RectF();
+    final RectF[] tileRect = {new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF()};
+    int sel = 0;              // tile 0-10
+    boolean navActive = false; // gamepad in use on the card: show the hint line
+    int touchItem = -1;
+    boolean touchOutside = false;
+    long closingAt = 0;
 
-    private void openedCard() {
+    void openedCard() {
         sel = 0;
         navActive = gamepadMode;
         touchItem = -1;
         releaseAll();
     }
 
-    private String patchValue(int i) {
+    String patchValue(int i) {
         switch (i) {
             case 0: return nget(0) != 0 ? "On" : "Off";
-            case 1: return GHOST_NAMES[Math.max(0, Math.min(2, nget(1)))];
+            case 1: return GHOST_NAMES[Math.max(0, Math.min(4, nget(1)))];
             case 2: return nget(2) != 0 ? "On" : "Off";
             case 3: return SKIP_NAMES[Math.max(0, Math.min(2, nget(3)))];
             case 4: return KORO_NAMES[Math.max(0, Math.min(2, nget(8)))];
@@ -968,14 +865,15 @@ public class TouchControls extends View {
                 if (isCompact() && p != 0) p = 5;
                 return p == 0 ? "Off" : (p == 5 ? "In game" : "Layout " + p);
             }
-            default: return nget(30) != 0 ? "On" : "Off";
+            case 9: return nget(30) != 0 ? "On" : "Off";
+            default: return nget(32) != 0 ? "On" : "Off";
         }
     }
 
-    private void patchesPick(int i) {
+    void patchesPick(int i) {
         switch (i) {
             case 0: nset(0, nget(0) != 0 ? 0 : 1); break;
-            case 1: nset(1, (nget(1) + 1) % 3); break;
+            case 1: { int g = nget(1); nset(1, g <= 0 ? 2 : g >= 4 ? 0 : g + 1); break; }   // Off, Wireframe, Dark, Shadow
             case 2: nset(2, nget(2) != 0 ? 0 : 1); break;
             case 3: nset(3, (nget(3) + 1) % 3); break;
             case 4: nset(8, (nget(8) + 1) % 3); break;
@@ -984,20 +882,21 @@ public class TouchControls extends View {
             case 7: nset(11, nget(11) != 0 ? 0 : 1); break;
             case 8: nset(29, isCompact() ? (previewStyle() == 0 ? 5 : 0) : (previewStyle() + 1) % 6); break;
             case 9: nset(30, nget(30) != 0 ? 0 : 1); break;
+            case 10: nset(32, nget(32) != 0 ? 0 : 1); lastTetrisEvent = nget(33); break;
             default: return;
         }
         buzz();
         invalidate();
     }
 
-    private void closePatches() {
+    void closePatches() {
         closingAt = SystemClock.uptimeMillis();
         nreq(REQ_CLOSE);
         qTouched = SystemClock.uptimeMillis();
         invalidate();
     }
 
-    private void patchIcon(Canvas c, int kind, float cx, float cy, float s, int color) {
+    void patchIcon(Canvas c, int kind, float cx, float cy, float s, int color) {
         strokeC(color, 1f, Math.max(2f, s * 0.16f));
         switch (kind) {
             case 0: // hard drop: arrow down onto a line
@@ -1088,6 +987,16 @@ public class TouchControls extends View {
                 c.drawLine(cx, cy, cx + r * 0.45f, cy + r * 0.2f, paint);
                 break;
             }
+            case 10: { // tetris voice: a speaker with sound waves
+                path.reset();
+                path.moveTo(cx - s * 0.8f, cy - s * 0.3f); path.lineTo(cx - s * 0.3f, cy - s * 0.3f);
+                path.lineTo(cx + s * 0.2f, cy - s * 0.75f); path.lineTo(cx + s * 0.2f, cy + s * 0.75f);
+                path.lineTo(cx - s * 0.3f, cy + s * 0.3f); path.lineTo(cx - s * 0.8f, cy + s * 0.3f); path.close();
+                c.drawPath(path, paint);
+                c.drawArc(cx - s * 0.1f, cy - s * 0.45f, cx + s * 0.6f, cy + s * 0.45f, -50f, 100f, false, paint);
+                c.drawArc(cx - s * 0.1f, cy - s * 0.8f, cx + s * 0.95f, cy + s * 0.8f, -50f, 100f, false, paint);
+                break;
+            }
             case 3: // skip celebrations: skip-to-end
                 path.reset();
                 path.moveTo(cx - s * 0.75f, cy - s * 0.5f); path.lineTo(cx - s * 0.75f, cy + s * 0.5f);
@@ -1101,16 +1010,18 @@ public class TouchControls extends View {
         paint.setStrokeJoin(Paint.Join.MITER);
     }
 
-    private void drawPatches(Canvas c) {
+    void drawPatches(Canvas c) {
         float d = density, W = getWidth(), H = getHeight();
-        float pad = 22f * d, gap = 14f * d, titleH = 26f * d, hintH = 30f * d;
-        float cw = Math.min(W * 0.94f, 600f * d);
+        final boolean cmp = isCompact();   // 4:3 handhelds: tighter card, bigger icons and text
+        float pad = (cmp ? 14f : 22f) * d, gap = (cmp ? 8f : 14f) * d, titleH = (cmp ? 20f : 26f) * d, hintH = (cmp ? 22f : 30f) * d;
+        float cw = Math.min(W * (cmp ? 0.97f : 0.94f), 600f * d);
         final int rows = (NT + 1) / 2;
         float tw = (cw - 2f * pad - gap) / 2f, th = tw * 0.5f;
         float ch = pad + titleH + rows * th + (rows - 1) * gap + hintH;
-        if (ch > H * 0.94f) {   // short landscape screens: shrink the tiles to fit
-            th = (H * 0.94f - pad - titleH - (rows - 1) * gap - hintH) / rows;
-            ch = H * 0.94f;
+        final float maxH = H * (cmp ? 0.98f : 0.94f);
+        if (ch > maxH) {   // short landscape screens: shrink the tiles to fit
+            th = (maxH - pad - titleH - (rows - 1) * gap - hintH) / rows;
+            ch = maxH;
         }
         float x0 = (W - cw) / 2f, y0 = (H - ch) / 2f;
         patchesCard.set(x0, y0, x0 + cw, y0 + ch);
@@ -1142,10 +1053,17 @@ public class TouchControls extends View {
             String val = patchValue(i);
             boolean on = !val.equals("Off");
             int col = selShown ? 0xFFFFFFFF : 0xFFC8CDD2;
-            patchIcon(c, i, bx + tileW / 2f, by + th * 0.33f, Math.min(15f * d, th * 0.16f), on ? YELLOW : col);
-            textC(c, PATCH_NAMES[i], bx + tileW / 2f, by + th * 0.66f, Math.min(15f * d, th * 0.15f), col, 1f, semi);
-            textC(c, val, bx + tileW / 2f, by + th * 0.85f, Math.min(12.5f * d, th * 0.125f),
-                    on ? YELLOW : 0xFF9AA4AD, 1f, Typeface.DEFAULT);
+            if (cmp) {
+                patchIcon(c, i, bx + tileW / 2f, by + th * 0.29f, th * 0.19f, on ? YELLOW : col);
+                textC(c, PATCH_NAMES[i], bx + tileW / 2f, by + th * 0.67f, th * 0.17f, col, 1f, semi);
+                textC(c, val, bx + tileW / 2f, by + th * 0.88f, th * 0.14f,
+                        on ? YELLOW : 0xFF9AA4AD, 1f, Typeface.DEFAULT);
+            } else {
+                patchIcon(c, i, bx + tileW / 2f, by + th * 0.33f, Math.min(15f * d, th * 0.16f), on ? YELLOW : col);
+                textC(c, PATCH_NAMES[i], bx + tileW / 2f, by + th * 0.66f, Math.min(15f * d, th * 0.15f), col, 1f, semi);
+                textC(c, val, bx + tileW / 2f, by + th * 0.85f, Math.min(12.5f * d, th * 0.125f),
+                        on ? YELLOW : 0xFF9AA4AD, 1f, Typeface.DEFAULT);
+            }
         }
 
         if (navActive) {
@@ -1160,7 +1078,7 @@ public class TouchControls extends View {
         paint.setTypeface(Typeface.DEFAULT);
     }
 
-    private boolean patchesTouch(MotionEvent e) {
+    boolean patchesTouch(MotionEvent e) {
         int a = e.getActionMasked();
         float x = e.getX(), y = e.getY();
         if (a == MotionEvent.ACTION_DOWN) {
@@ -1228,7 +1146,7 @@ public class TouchControls extends View {
 
     // ----------------------------------------------------------------- input
 
-    private void hit(float x, float y, boolean[] out) {
+    void hit(float x, float y, boolean[] out) {
         if (menuOpen) return;
         float dx = x - dpadX, dy = y - dpadY;
         float dist = (float) Math.hypot(dx, dy);
@@ -1319,7 +1237,7 @@ public class TouchControls extends View {
         return true;
     }
 
-    private boolean holdButtonShown() {
+    boolean holdButtonShown() {
         return nget(11) != 0;
     }
 
@@ -1333,7 +1251,7 @@ public class TouchControls extends View {
         return true;
     }
 
-    private void apply(boolean[] now) {
+    void apply(boolean[] now) {
         boolean changed = false;
         for (int i = 0; i < COUNT; i++) {
             if (now[i] == pressed[i]) continue;

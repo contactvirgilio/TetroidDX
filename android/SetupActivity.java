@@ -229,6 +229,7 @@ public class SetupActivity extends Activity {
             + "SOFTWARE\n"
             + "GB Recompiled by arcanite24 (MIT). SDL2 (zlib License). Dear ImGui by Omar "
             + "Cornut (MIT). Patches assembled with RGBDS.\n"
+            + "Announcer voice clips: text-to-speech from luvvoice.com, made robotic.\n"
             + "BPreplay font, Copyright (c) 2004 George Triantafyllakos and Magenta, "
             + "SIL Open Font License 1.1.\n\n"
             + "Android app, menu and touch controls built with Claude (Anthropic) "

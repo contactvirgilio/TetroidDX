@@ -203,6 +203,10 @@ def patch_platform(proj, patch_table):
         "                    g_tdx_lockdelay = (strcmp(value, \"0\") != 0);\n"
         "                    continue;\n"
         "                }\n"
+        "                if (strcmp(key, \"tdx.voice\") == 0) {\n"
+        "                    g_tdx_voice = (strcmp(value, \"0\") != 0);\n"
+        "                    continue;\n"
+        "                }\n"
         "                if (strcmp(key, \"tdx.preview\") == 0) {\n"
         "                    long pv2 = strtol(value, NULL, 10);\n"
         "                    g_tdx_preview = (pv2 >= 0 && pv2 <= 5) ? (int)pv2 : 4;\n"
@@ -235,7 +239,7 @@ def patch_platform(proj, patch_table):
         "                }\n"
         "                if (strcmp(key, \"tdx.ghost\") == 0) {\n"
         "                    long g = strtol(value, NULL, 10);\n"
-        "                    g_tdx_ghost = (g >= 0 && g <= 2) ? (int)g : 0;\n"
+        "                    g_tdx_ghost = (g >= 0 && g <= 4) ? (int)g : 0; if (g_tdx_ghost == 1) g_tdx_ghost = 2;\n"
         "                    continue;\n"
         "                }\n"
         "                if (strcmp(key, \"savestate.slot\") == 0) {\n",
@@ -256,6 +260,7 @@ def patch_platform(proj, patch_table):
         "    fprintf(file, \"tdx.hold=%d\\n\", g_tdx_hold ? 1 : 0);\n"
         "    fprintf(file, \"tdx.preview=%d\\n\", g_tdx_preview);\n"
         "    fprintf(file, \"tdx.lock=%d\\n\", g_tdx_lockdelay ? 1 : 0);\n"
+        "    fprintf(file, \"tdx.voice=%d\\n\", g_tdx_voice ? 1 : 0);\n"
         "    fprintf(file, \"display.pal=%d\\n\", g_tdx_palette);\n"
         "",
         1, "prefs save")
@@ -267,9 +272,9 @@ def patch_platform(proj, patch_table):
     text = replace_exact(
         text,
         "    tdx_sync_options(g_registered_ctx);\n",
-        "    tdx_sync_options(g_registered_ctx);\n    tdx_piece_colours(g_registered_ctx);\n"
+        "    tdx_sync_options(g_registered_ctx);\n    tdx_piece_colours(g_registered_ctx);\n    tdx_ghost_palette(g_registered_ctx);\n"
         "    tdx_queue_frame(g_registered_ctx);\n    tdx_hold_frame(g_registered_ctx);\n"
-        "    tdx_celebration_frame(g_registered_ctx);\n    tdx_process_requests();\n",
+        "    tdx_celebration_frame(g_registered_ctx);\n    tdx_tetris_frame(g_registered_ctx);\n    tdx_process_requests();\n",
         1, "menu requests")
     # Settings go next to the save: in the --save-dir folder when one is given
     # (Tetroid DX passes the TetroidDX folder in the device's main storage).
@@ -530,6 +535,10 @@ android {
         externalNativeBuild {
             cmake {
                 arguments "-DANDROID_STL=c++_shared", "-DSDL2_SOURCE_DIR=${sdl2SourceDir}"
+                // Optional compiler cache (CI sets TDX_CCACHE): unchanged C/C++ files are not recompiled.
+                if (System.getenv("TDX_CCACHE")) {
+                    arguments "-DCMAKE_C_COMPILER_LAUNCHER=ccache", "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
+                }
                 abiFilters "arm64-v8a"
             }
         }
@@ -610,6 +619,15 @@ def patch_android(proj, rom_sha256):
     assets = os.path.join(app, "src", "main", "assets")
     os.makedirs(assets, exist_ok=True)
     shutil.copyfile(font, os.path.join(assets, "BPreplayBold.otf"))
+    for clip in ("tetris_voice.wav", "b2b_voice.wav", "allclear_voice.wav", "perfect_voice.wav", "maxlevel_voice.wav",
+                 "tspin_voice.wav", "tspin1_voice.wav", "tspin2_voice.wav", "tspin3_voice.wav", "maxout_voice.wav", "maxspeed_voice.wav", "gameover_voice.wav",
+                 "congratulations_voice.wav", "excellent_voice.wav", "welldone_voice.wav", "vanilla_voice.wav", "guideline_voice.wav",
+                 "konami_jingle.wav", "onemillion_voice.wav", "onfire_voice.wav", "luckyseven_voice.wav", "selfdestruct_voice.wav", "unlock_big.wav", "crescendo_unlock.wav", "waterfall_unlock.wav", "korean_stacking_chime.wav", "gunslinger.wav", "tripledouble_chime.wav", "tripletriple_chime.wav",
+                 "birthday_voice.wav", "unlock100.wav", "unlock200.wav"):
+        src = os.path.join(HERE, clip)
+        if not os.path.exists(src):
+            sys.exit("PATCH FAILED [voice]: android/%s missing" % clip)
+        shutil.copyfile(src, os.path.join(assets, clip))
     res = os.path.join(app, "src", "main", "res")
     write(os.path.join(res, "drawable", "ic_launcher_background.xml"), ICON_BACKGROUND)
     write(os.path.join(res, "drawable", "ic_launcher_foreground.xml"), ICON_FOREGROUND)
@@ -620,7 +638,7 @@ def patch_android(proj, rom_sha256):
     if os.path.isdir(java_dir):
         shutil.rmtree(java_dir)
     os.makedirs(java_dir)
-    for name in ("SetupActivity.java", "GameActivity.java", "TouchControls.java"):
+    for name in ("SetupActivity.java", "GameActivity.java", "TouchControls.java", "TouchEffects.java", "TouchBase.java"):
         src = os.path.join(HERE, name)
         if not os.path.isfile(src):
             sys.exit(f"PATCH FAILED [java]: android/{name} missing from repo (check the upload name)")

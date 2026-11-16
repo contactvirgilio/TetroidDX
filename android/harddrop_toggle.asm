@@ -136,25 +136,40 @@ draw_ghost_tetromino::
         ld      [$c012+$0c], a
         ret
 
-; Tetroid DX: tile choice for the ghost, in free space in bank 0.
-; Light ghost: the outline tile. Dark ghost: the piece's own tiles in the grey
-; palette, except the O piece, whose tile is mostly the palette's white and
-; looked light; it uses the T piece's block tile ($98) instead.
+; Tetroid DX: ghost mode and tile choice, in free space in bank 0. The app writes
+; ghost_mode ($3900): 1 Ghost, 2 Wireframe (same outline tile; the app darkens the
+; ghost palette's outline colour), 3 Dark (each piece's own tile), 4 Shadow (own
+; tiles; the app greys the ghost palette's white).
 SECTION "ghost_tile", ROM0[$3900]
+ghost_mode::
+        db      0
 ghost_tile::
-        ld      a, [OPTIONS]
-        bit     OPT_GHOST_DARK, a
-        jr      nz, .dark
+        ld      a, [ghost_mode]
+        cp      3
+        jr      nc, .own
         ld      a, GHOST_TILE
         and     a               ; NZ: use this tile
         ret
-.dark
-        ld      a, [$af85]      ; current piece
-        cp      6               ; O
-        jr      z, .o
+.own
         xor     a               ; Z: keep the piece's own tiles
         ret
-.o
-        ld      a, $98
+
+; Tetroid DX: Select during play hides the game's NEXT window ($af87: 1 shown,
+; 0 hidden; the original code flips it with "xor 1"). With next_lock ($3920)
+; set by the app, Select leaves the window shown. 0 = original behaviour.
+SECTION "next_toggle", ROMX[$5876], BANK[1]
+        call    next_flip       ; was: ld a, [$af87] / xor 1
+        nop
+        nop
+
+SECTION "next_lock", ROM0[$3920]
+next_lock::
+        db      0
+next_flip::
+        ld      a, [next_lock]
         and     a
+        ld      a, 1            ; flags unchanged
+        ret     nz              ; locked: always shown
+        ld      a, [$af87]
+        xor     1
         ret

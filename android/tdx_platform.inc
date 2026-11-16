@@ -37,12 +37,19 @@ static int g_tdx_randomizer = 0;
 static int g_tdx_ghost = 0;
 #define TDX_OPTIONS_OFFSET 0x7FFFu
 #define TDX_OPTIONS_OFFSET_B5 0x17FFFu   /* bank-5 copy, read by the music hook */
+#define TDX_GHOST_MODE_OFFSET 0x3900u    /* bank 0: ghost mode 1-4, read by the ghost patch */
+#define TDX_NEXT_LOCK_OFFSET 0x3920u     /* bank 0: 1 = Select no longer hides the NEXT window */
+/* Select hides the game's NEXT window only with vanilla settings (every patch
+ * off; palette, music and Announcer do not count). With any patch on it stays
+ * shown: hiding breaks the ghost and does not hide our own preview anyway. */
+static bool tdx_next_locked(void);
+#define TDX_NEXT_LOCKED() tdx_next_locked()
 
 static uint8_t tdx_options_byte(void) {
     uint8_t v = 0;
     if (g_tdx_harddrop) v |= 0x01;
     if (g_tdx_ghost == 1) v |= 0x02;
-    if (g_tdx_ghost == 2) v |= 0x06;
+    if (g_tdx_ghost >= 2) v |= 0x06;
     if (g_tdx_dontpanic) v |= 0x08;
     if (g_tdx_skipceleb == 1) v |= 0x10;
     if (g_tdx_korobeiniki) v |= 0x20;
@@ -58,6 +65,10 @@ static void tdx_sync_options(GBContext* ctx) {
     }
     if (ctx && ctx->rom && ctx->rom_size > TDX_OPTIONS_OFFSET_B5) {
         ctx->rom[TDX_OPTIONS_OFFSET_B5] = tdx_options_byte();
+    }
+    if (ctx && ctx->rom && ctx->rom_size > TDX_GHOST_MODE_OFFSET) {
+        ctx->rom[TDX_GHOST_MODE_OFFSET] = (uint8_t)g_tdx_ghost;
+        ctx->rom[TDX_NEXT_LOCK_OFFSET] = TDX_NEXT_LOCKED() ? 1 : 0;
     }
     if (ctx && ctx->rom && ctx->rom_size > TDX_RANDOMIZER_OFFSET) {
         ctx->rom[TDX_RANDOMIZER_OFFSET] = (uint8_t)g_tdx_randomizer;
@@ -176,6 +187,39 @@ static void tdx_pc_write(GBContext* ctx, const uint8_t* src) {
             if (i < 64) ppu->bg_palette_ram[i] = src[i];
             else ppu->obj_palette_ram[i - 64] = src[i];
         }
+    }
+}
+
+/* Ghost styles Wireframe and Shadow: the ghost uses sprite palette 7, whose
+ * outline colour is white. During play only, that one colour is darkened on
+ * screen; when play ends the game's own colour is put back once. Outside play
+ * nothing is touched, so menu sprites that share the palette fade normally.
+ * The game's palette buffer is never changed. */
+static bool tdx_in_play_now(void);
+static void tdx_ghost_palette(GBContext* ctx) {
+    static bool applied = false;
+    if (!ctx || !ctx->wram || !ctx->ppu) return;
+    GBPPU* ppu = (GBPPU*)ctx->ppu;
+    const uint8_t* buf = ctx->wram + 0x280;
+    const bool want = (g_tdx_ghost == 2 || g_tdx_ghost == 4) && tdx_in_play_now();
+    if (want) {
+        if (g_tdx_ghost == 2) {
+            /* Wireframe adapts to the playfield colour (background palette 7, colour 1,
+             * which the game changes with the level): black on light, grey on dark. */
+            const unsigned bg = ppu->bg_palette_ram[58] | (ppu->bg_palette_ram[59] << 8);
+            const unsigned luma = 299u * (bg & 31) + 587u * ((bg >> 5) & 31) + 114u * ((bg >> 10) & 31);
+            const bool light_bg = luma >= 16000u;
+            ppu->obj_palette_ram[58] = light_bg ? 0x00 : 0xEF;   /* black, or grey 0x3DEF (15/31) */
+            ppu->obj_palette_ram[59] = light_bg ? 0x00 : 0x3D;
+        } else {
+            ppu->obj_palette_ram[58] = 0x94;   /* Shadow: grey 0x5294 (20/31), a soft line that */
+            ppu->obj_palette_ram[59] = 0x52;   /* still completes each block's inner square */
+        }
+        applied = true;
+    } else if (applied) {
+        ppu->obj_palette_ram[58] = buf[64 + 58];
+        ppu->obj_palette_ram[59] = buf[64 + 59];
+        applied = false;
     }
 }
 
@@ -461,6 +505,10 @@ extern "C" int tdx_fill_rom(uint8_t* dst, size_t size) {
     if (size > TDX_OPTIONS_OFFSET_B5) {
         dst[TDX_OPTIONS_OFFSET_B5] = tdx_options_byte();
     }
+    if (size > TDX_GHOST_MODE_OFFSET) {
+        dst[TDX_GHOST_MODE_OFFSET] = (uint8_t)g_tdx_ghost;
+        dst[TDX_NEXT_LOCK_OFFSET] = TDX_NEXT_LOCKED() ? 1 : 0;
+    }
     if (size > TDX_RANDOMIZER_OFFSET) {
         dst[TDX_RANDOMIZER_OFFSET] = (uint8_t)g_tdx_randomizer;
     }
@@ -506,6 +554,10 @@ Java_org_tetrisdx_recomp_TouchControls_nativeHardDropOn(JNIEnv* env, jclass cls)
 #define TDX_QUEUE_PIECE_OFFSET 0x3FFEu
 static bool g_tdx_hold = false;            /* saved as tdx.hold */
 static int g_tdx_preview = 4;              /* queue layout 0 off, 1-5; tdx.preview */
+static bool tdx_next_locked(void) {
+    return g_tdx_harddrop || g_tdx_ghost != 0 || g_tdx_dontpanic || g_tdx_skipceleb != 0 || g_tdx_srs ||
+           g_tdx_lockdelay || g_tdx_randomizer != 0 || g_tdx_hold || g_tdx_preview != 0;
+}
 static int g_tdx_hold_piece = -1;
 static bool g_tdx_hold_used = false;
 static std::atomic<bool> g_tdx_hold_req{false};
@@ -521,6 +573,7 @@ static uint8_t g_tdx_pool[35];
 static uint8_t g_tdx_order[7];
 static int g_tdx_order_n = 0;
 static std::atomic<bool> g_tdx_in_play{false};
+static bool tdx_in_play_now(void) { return g_tdx_in_play.load(std::memory_order_relaxed); }
 
 static uint32_t tdx_rand(void) {
     /* xorshift32 */
@@ -691,6 +744,7 @@ static void tdx_hold_frame(GBContext* ctx) {
         g_tdx_hold_spawning = true;
         e[0xC62] = 0;
         e[0xC0F] = 5;                        /* spawn the next piece */
+        prev = 5;                            /* so the new piece's arrival (5 -> 3, even within one frame) is seen */
         return;
     }
     const int t = g_tdx_hold_piece;
@@ -793,6 +847,277 @@ static void tdx_celebration_frame(GBContext* ctx) {
         ctx->wram[0x0A0] = 0x02;
     }
     prev_start = start;
+}
+
+/* Announcer: a 4-line clear (a Tetris) and a Tetris straight after another
+ * (back-to-back). The game stores the lines cleared by the last drop in $AC62
+ * and enters its line-clear state ($AC0F = 6) right after; both are read here
+ * between frames, nothing in the ROM changes. The app plays the voice clip and
+ * flashes the Hold and Preview boxes when the event counter changes. */
+static bool g_tdx_voice = true;                   /* saved as tdx.voice; on by default, it never changes the game */
+static std::atomic<int> g_tdx_tetris_event{0};    /* counts events */
+static std::atomic<int> g_tdx_tetris_kind{0};     /* 1 Tetris, 2 back-to-back */
+static bool tdx_board_empty(GBContext* ctx) {
+    /* The playfield is 10 cells wide from $AD02 and 19 rows deep, 16 bytes per row. */
+    for (int row = 0; row < 19; ++row)
+        for (int col = 0; col < 10; ++col)
+            if (ctx->eram[0xD02 + row * 16 + col] != 0xFB) return false;
+    return true;
+}
+static std::atomic<int> g_tdx_milestone{0};
+static int g_tdx_later_kind[4] = {0, 0, 0, 0};
+static int g_tdx_later_wait[4] = {0, 0, 0, 0};
+static void tdx_voice_event_later(int kind, int frames) {    /* so two events never share a frame */
+    for (int i = 0; i < 4; ++i)
+        if (!g_tdx_later_kind[i]) { g_tdx_later_kind[i] = kind; g_tdx_later_wait[i] = frames; return; }
+}
+static int g_tdx_ev_cool = 0;    /* frames left before the next event may go out (the app polls every 50 ms) */
+static void tdx_voice_event(int kind) {
+    if (g_tdx_ev_cool > 0) { tdx_voice_event_later(kind, g_tdx_ev_cool + 1); return; }   /* failsafe: a second event waits its turn */
+    g_tdx_tetris_kind.store(kind, std::memory_order_relaxed);
+    g_tdx_tetris_event.fetch_add(1, std::memory_order_relaxed);
+    g_tdx_ev_cool = 8;
+}
+/* Also: a perfect clear (the board is empty once the clear has settled, the
+ * game is back to a falling piece, state 3 or 5) and reaching level 30 ($AF97
+ * is the level in BCD). Kinds: 1 Tetris, 2 back-to-back, 3 perfect clear,
+ * 4 max level. */
+/* T-Spin (SRS only, regular T-Spins only). While a piece falls (state 3) the
+ * last move is tracked from $AF80 X, $AF81 Y, $AF82 rotation, $AF85 piece: a
+ * change of rotation is a rotation, a change of X or Y is a move. When the T
+ * locks, it is a T-Spin if the last move was a rotation, both corners on the
+ * side the T points to are filled and at least one corner behind it is (walls
+ * count as filled). The T's centre and nub are found from its shape in the ROM. */
+static bool tdx_tspin_corners(GBContext* ctx, int t, int x, int y, int rot) {
+    const uint8_t* rom = ctx->rom;
+    const uint8_t* e = ctx->eram;
+    if (!rom || !e || t < 0 || t > 6) return false;
+    const unsigned ptr = rom[0x6202 + 2 * t] | (rom[0x6203 + 2 * t] << 8);
+    const unsigned shape = ptr + 16u * (unsigned)(rot & 3);
+    int cr = -1, cc = -1, dr = 0, dc = 0, cells = 0;
+    for (int r = 0; r < 4; ++r)
+        for (int c = 0; c < 4; ++c)
+            if (rom[shape + r * 4 + c]) cells++;
+    if (cells != 4) return false;
+    auto has = [&](int r, int c) { return r >= 0 && r < 4 && c >= 0 && c < 4 && rom[shape + r * 4 + c] != 0; };
+    for (int r = 0; r < 4; ++r)
+        for (int c = 0; c < 4; ++c) {
+            if (!has(r, c)) continue;
+            int n = has(r - 1, c) + has(r + 1, c) + has(r, c - 1) + has(r, c + 1);
+            if (n == 3) { cr = r; cc = c; }
+        }
+    if (cr < 0) return false;                      /* not a T */
+    static const int D[4][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
+    for (int k = 0; k < 4; ++k) {                  /* the nub: the neighbour with no other neighbour */
+        int nr = cr + D[k][0], nc = cc + D[k][1];
+        if (!has(nr, nc)) continue;
+        int n = has(nr - 1, nc) + has(nr + 1, nc) + has(nr, nc - 1) + has(nr, nc + 1);
+        if (n == 1) { dr = D[k][0]; dc = D[k][1]; }
+    }
+    if (!dr && !dc) return false;
+    const int pr = dc ? 1 : 0, pc = dr ? 1 : 0;    /* sideways direction */
+    const unsigned base = 0xD00u + (unsigned)y * 16u + (unsigned)x;
+    auto filled = [&](int r, int c) { return e[(base + (unsigned)(r * 16 + c)) & 0x1FFF] != 0xFB; };
+    int front = 0, back = 0;
+    for (int sgn = -1; sgn <= 1; sgn += 2) {
+        front += filled(cr + dr + sgn * pr, cc + dc + sgn * pc);
+        back += filled(cr - dr + sgn * pr, cc - dc + sgn * pc);
+    }
+    return front == 2 && back >= 1;
+}
+/* Kinds: 1 Tetris, 2 back-to-back, 3 perfect clear, 4 max level,
+ * 5/6/7 T-Spin Single/Double/Triple, 8 T-Spin without a line clear,
+ * 9 maximum score (9,999,999), 10 maximum speed (level 20), 11 game over, 12 praise (Congratulations or
+ * Excellent), 13 praise (Well done), 14 Vanilla, 15 Guideline (the GUIDELINE text), 16 Guideline with
+ * its palette (the text sparkles); 11-16 have no flash.
+ * Easter eggs: 17 Konami code, 18 one million points, 19 and 20 lines, 21 On fire (3 Tetrises in a
+ * row), 22 Lucky seven (7 in a row), 23 a game starts (the app checks the date). */
+static void tdx_tetris_frame(GBContext* ctx) {
+    if (g_tdx_ev_cool > 0) --g_tdx_ev_cool;
+    static uint8_t prev_state = 0, prev_level = 0;
+    static bool streak = false, pending_pc = false, prev_maxed = false;
+    static uint8_t prev_ws = 0, prev_held = 0, prev_hund = 0;
+    static bool prev_mil = false;
+    static int run = 0, konami = 0, start_quiet = 0;
+    static bool prev_play = false;
+    static int quiet_frames = 0;
+    static int pt = -1, px = 0, py = 0, prot = 0;
+    static int hist[5] = {0, 0, 0, 0, 0};   /* the last five line-clear sizes, for Crescendo, Waterfall and Korean Stacking */
+    static bool last_rot = false, cand = false, locked_tspin = false;
+    if (!ctx || !ctx->eram) return;
+    const uint8_t st = ctx->eram[0xC0F];
+    const uint8_t level = ctx->eram[0xF97];
+    const bool play = g_tdx_in_play.load(std::memory_order_relaxed);
+    if (!play) { streak = false; pending_pc = false; cand = false; run = 0; for (int k = 0; k < 5; ++k) hist[k] = 0; }
+    if (st == 0x03) {
+        const int t = ctx->eram[0xF85], x = ctx->eram[0xF80], y = ctx->eram[0xF81], rot = ctx->eram[0xF82];
+        if (prev_state != 0x03 || t != pt) last_rot = false;
+        else if (rot != prot) last_rot = true;
+        else if (x != px || y != py) last_rot = false;
+        pt = t; px = x; py = y; prot = rot;
+        cand = last_rot && tdx_tspin_corners(ctx, t, x, y, rot);
+    }
+    if (prev_state == 0x03 && st == 0x04) {        /* locked: re-check at the final position (a hard drop may have moved it) */
+        const int t = ctx->eram[0xF85], x = ctx->eram[0xF80], y = ctx->eram[0xF81], rot = ctx->eram[0xF82];
+        cand = last_rot && t == pt && x == px && y == py && rot == prot
+               && tdx_tspin_corners(ctx, t, x, y, rot);
+    }
+    if (prev_state == 0x04 && st != 0x04) {        /* the lock is resolved: a clear (6) or the next piece */
+        if (st == 0x06) {
+            const uint8_t lines = ctx->eram[0xC62];
+            locked_tspin = cand && lines >= 1 && lines <= 3;
+            if (locked_tspin && g_tdx_voice) tdx_voice_event(4 + lines);
+        } else if (cand && (st == 0x05 || st == 0x03) && g_tdx_voice) {
+            tdx_voice_event(8);
+        }
+        cand = false;
+    }
+    if (st == 0x06 && prev_state != 0x06) {
+        const uint8_t lines = ctx->eram[0xC62];
+        pending_pc = lines >= 1 && lines <= 4;
+        if (lines >= 1 && lines <= 4) {
+            for (int k = 0; k < 4; ++k) hist[k] = hist[k + 1];
+            hist[4] = lines;
+            if (g_tdx_voice) {
+                bool up = hist[1] == 1 && hist[2] == 2 && hist[3] == 3 && hist[4] == 4;
+                bool down = hist[1] == 4 && hist[2] == 3 && hist[3] == 2 && hist[4] == 1;
+                bool five = hist[0] == 1 && hist[1] == 1 && hist[2] == 1 && hist[3] == 1 && hist[4] == 1;
+                /* Crescendo ends on a Tetris, so it waits for the Tetris voice. */
+                if (up) { tdx_voice_event_later(26, 90); for (int k = 0; k < 5; ++k) hist[k] = 0; }
+                else if (down) { tdx_voice_event_later(27, 40); for (int k = 0; k < 5; ++k) hist[k] = 0; }
+                else if (five) { tdx_voice_event_later(28, 40); for (int k = 0; k < 5; ++k) hist[k] = 0; }
+            }
+        }
+        if (lines == 4) {
+            if (g_tdx_voice) tdx_voice_event(streak ? 2 : 1);   /* On fire / Lucky 7 follow 1.2 s later: Tetris voice first, then theirs */
+            streak = true;
+            ++run;
+            if (g_tdx_voice && run == 3) tdx_voice_event_later(21, 70);   /* On fire */
+            if (g_tdx_voice && run == 7) tdx_voice_event_later(22, 70);   /* Lucky seven */
+        } else if (lines >= 1 && lines <= 3) {
+            if (g_tdx_voice && (lines == 2 || lines == 3)) {
+                if (hist[2] == lines && hist[3] == lines && hist[4] == lines) { tdx_voice_event(lines == 2 ? 31 : 32); hist[2] = hist[3] = hist[4] = 0; }   /* Triple Doubles / Triple Triples: heartbeat glow */
+                else tdx_voice_event(lines == 2 ? 29 : 30);
+            }
+            streak = locked_tspin;                 /* a T-Spin keeps a back-to-back streak alive */
+            run = 0;
+        }
+    } else if (pending_pc && (st == 0x03 || st == 0x05)) {
+        pending_pc = false;
+        if (g_tdx_voice && tdx_board_empty(ctx)) tdx_voice_event(3);
+    }
+    if (play && g_tdx_voice && level == 0x30 && prev_level != 0x30 && prev_level != 0) tdx_voice_event(4);
+    /* Easter eggs. Queued events go out a little later so they never share a frame. */
+    for (int i = 0; i < 4; ++i)
+        if (g_tdx_later_kind[i] && --g_tdx_later_wait[i] <= 0 && g_tdx_ev_cool == 0) {
+            tdx_voice_event(g_tdx_later_kind[i]);
+            g_tdx_later_kind[i] = 0;
+        }
+    /* A new game starts (a zero score at the start of play): kind 23 lets the app check the date. */
+    if (start_quiet > 0) --start_quiet;
+    if (play && !prev_play && start_quiet == 0 && g_tdx_voice &&
+        ctx->eram[0xF89] == 0 && ctx->eram[0xF8A] == 0 && ctx->eram[0xF8B] == 0 && ctx->eram[0xF8C] == 0) {
+        tdx_voice_event_later(23, 8);
+        start_quiet = 1200;
+    }
+    /* Konami code on a menu or title screen: Up Up Down Down Left Right Left Right B A Start. */
+    if (ctx->hram) {
+        const uint8_t held = ctx->hram[0x02], pressed = (uint8_t)(held & ~prev_held);
+        prev_held = held;
+        static const uint8_t code[11] = {0x40, 0x40, 0x80, 0x80, 0x20, 0x10, 0x20, 0x10, 0x02, 0x01, 0x08};
+        if (pressed && !play) {
+            if (pressed == code[konami]) ++konami;
+            else konami = (pressed == code[0]) ? 1 : 0;
+            if (konami == 11) { if (g_tdx_voice) tdx_voice_event(17); konami = 0; }
+        }
+    }
+    /* One million points ($AF8C is the two top digits of the score). */
+    const bool mil = ctx->eram[0xF8C] != 0;
+    if (mil && !prev_mil && play && g_tdx_voice) tdx_voice_event_later(18, 4);
+    prev_mil = mil;
+    /* 100 and 200 lines in the modes that count up ($AF8E is the hundreds digit). */
+    {   /* Line milestones: every 100 to 1,000, every 1,000 to 5,000, then every 5,000 (3 BCD bytes at $AF8D-$AF8F). */
+        static int prev_lines = 0;
+        auto bcd = [](uint8_t b) { return (b >> 4) * 10 + (b & 15); };
+        const int lines = bcd(ctx->eram[0xF8D]) + 100 * bcd(ctx->eram[0xF8E]) + 10000 * bcd(ctx->eram[0xF8F]);
+        if (play && g_tdx_voice && ctx->eram[0xC0A] != 2 && lines > prev_lines && lines - prev_lines <= 4) {
+            for (int m = prev_lines + 1; m <= lines; ++m) {
+                const bool ms = m >= 100 && ((m <= 1000 && m % 100 == 0) || (m <= 5000 && m % 1000 == 0) || m % 5000 == 0);
+                if (ms) { g_tdx_milestone.store(m, std::memory_order_relaxed); tdx_voice_event_later(25, 20); }
+            }
+        }
+        /* Gunslinger: 40 Lines (mode 2, the line counter counts down) cleared in under 2 minutes by the game's own clock
+         * ($AF93 seconds, $AF94 minutes, both BCD; the clock stops when the game pauses). */
+        if (play && g_tdx_voice && ctx->eram[0xC0A] == 2 && prev_lines > 0 && lines == 0 && ctx->eram[0xF94] < 2) tdx_voice_event(33);
+        prev_lines = lines;
+    }
+    /* "Vanilla": a new game starts (play begins with a zero score) while every patch that
+     * changes the game is off and the palette is Original or GBC LCD. Korobeiniki (music) and the Announcer do not count. At most
+     * once every 20 s, so pausing before the first points does not repeat it. */
+    if (quiet_frames > 0) --quiet_frames;
+    if (play && !prev_play && quiet_frames == 0 && g_tdx_voice && !g_tdx_harddrop && g_tdx_ghost == 0 &&
+        !g_tdx_dontpanic && g_tdx_skipceleb == 0 && !g_tdx_srs && !g_tdx_lockdelay &&
+        (g_tdx_palette == TDX_PAL_ORIGINAL || g_tdx_palette == TDX_PAL_GBC_LCD) &&
+        g_tdx_randomizer == 0 && !g_tdx_hold && g_tdx_preview == 0 &&
+        ctx->eram[0xF89] == 0 && ctx->eram[0xF8A] == 0 && ctx->eram[0xF8B] == 0 && ctx->eram[0xF8C] == 0) {
+        tdx_voice_event(14);
+        quiet_frames = 1200;
+    }
+    /* "Guideline": a new game starts with the modern guideline set on (SRS, Hold, 7-Bag, Hard
+     * Drop, Ghost Piece, Lock Delay, Preview). With the Guideline palette also on, the app
+     * adds the sparkling GUIDELINE text (kind 16 instead of 15). */
+    if (play && !prev_play && quiet_frames == 0 && g_tdx_voice && g_tdx_srs && g_tdx_hold &&
+        g_tdx_randomizer == 1 && g_tdx_harddrop && g_tdx_ghost != 0 && g_tdx_lockdelay &&
+        g_tdx_preview != 0 &&
+        ctx->eram[0xF89] == 0 && ctx->eram[0xF8A] == 0 && ctx->eram[0xF8B] == 0 && ctx->eram[0xF8C] == 0) {
+        tdx_voice_event(g_tdx_palette == TDX_PAL_GUIDELINE ? 16 : 15);
+        quiet_frames = 1200;
+    }
+    /* Quit (Start + Select) right after a start message: it was suppressed, so give the next game its message. */
+    {
+        static int since_start = 9999;
+        if (quiet_frames > 1190 || start_quiet > 1190) since_start = 0; else if (since_start < 9999) ++since_start;
+        if (!play && prev_play && since_start < 120) { quiet_frames = 0; start_quiet = 0; }
+    }
+    prev_play = play;
+    /* End-of-game praise: a celebration is $C0A0 = $10 (Marathon, tier in $D900 from the
+     * final score) or $11 (40 Lines / Ultra, rank in $C13B). Marathon tier 5 and rank 3 get
+     * "Congratulations" or "Excellent" (kind 12), Marathon tier 4 and rank 2 get "Well done"
+     * (kind 13); the app plays it about 1.5 s into the celebration. */
+    if (ctx->wram) {
+        const uint8_t ws = ctx->wram[0x0A0];
+        static int praise_quiet = 0;
+        if (praise_quiet > 0) --praise_quiet;
+        if (ws != prev_ws && g_tdx_voice && praise_quiet == 0 && (ws == 0x10 || ws == 0x11)) {
+            if (ws == 0x10) {
+                const uint8_t tier = ctx->wram[0x1900];
+                if (tier == 5) { tdx_voice_event(12); praise_quiet = 1800; } else if (tier == 4) { tdx_voice_event(13); praise_quiet = 1800; }   /* once per celebration */
+            } else if (ws == 0x11) {
+                const uint8_t rank = ctx->wram[0x13B];
+                if (rank == 3) { tdx_voice_event(12); praise_quiet = 1800; } else if (rank == 2) { tdx_voice_event(13); praise_quiet = 1800; }
+            }
+        }
+        prev_ws = ws;
+    }
+    /* Game over: the game enters its top-out state ($0A, the board fills up) from play. */
+    {   /* $C119 is the game's "game over in progress" flag (1 on a loss; $80 on a VS win). */
+        static uint8_t prev_over = 0;
+        static int over_quiet = 0;
+        const uint8_t over = ctx->wram[0x119];
+        const bool top_out = (st == 0x0A && prev_state >= 0x03 && prev_state <= 0x08) ||
+                             (over != 0 && prev_over == 0 && !(over & 0x80));
+        if (over_quiet > 0) over_quiet--;
+        if (top_out && over_quiet == 0 && g_tdx_voice) { tdx_voice_event(11); over_quiet = 300; }
+        prev_over = over;
+    }
+    /* Easter egg: the score is held in BCD at $AF89-$AF8C and caps at 9,999,999. */
+    const bool maxed = ctx->eram[0xF89] == 0x99 && ctx->eram[0xF8A] == 0x99 &&
+                       ctx->eram[0xF8B] == 0x99 && ctx->eram[0xF8C] == 0x09;
+    if (maxed && !prev_maxed && play && g_tdx_voice) tdx_voice_event(9);
+    prev_maxed = maxed;
+    if (play && g_tdx_voice && level == 0x20 && prev_level != 0x20 && prev_level != 0) tdx_voice_event(10);   /* max speed */
+    prev_level = level;
+    prev_state = st;
 }
 
 /* ---- end Tetris DX additions ---- */

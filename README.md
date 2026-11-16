@@ -1,4 +1,4 @@
-# Tetroid DX 1.0
+# Tetroid DX 1.5
 
 Tetris DX (Game Boy Color) on Android, built by **statically recompiling** the
 game with [GB Recompiled](https://github.com/arcanite24/gb-recompiled), not by
@@ -9,18 +9,19 @@ obtained ROM, and the app asks for it on first launch, so the APK never
 contains any part of the game.
 
 ## Features
-Everything is optional and off by default. With every patch off, the game runs
-its original code.
+Everything is optional and off by default (except the Announcer, which never
+changes the game). With every patch off, the game runs its original code.
 
-- **Hard Drop** and **Ghost Piece** (light or dark)
+- **Hard Drop** and **Ghost Piece** (Off, Wireframe, Dark or Shadow)
 - **Hold** (touch button, or L1 / R1)
-- **Next-piece previews**: five layouts, plus **In game** for 4:3 handhelds
+- **Next-piece previews**: five layouts, plus **In game** for 4:3 handhelds. With any patch on, Select no longer hides the Next piece (the original game keeps it)
 - **Lock Delay**
 - **SRS Rotation**
 - **Randomizer**: Tetris DX, 7-Bag or 35-Bag
 - **Skip Celebrations**: Off, Always, or Start skips
 - **Korobeiniki**: Original, or Plus (adds a first panic song)
 - **Don't Panic**
+- **Announcer**: spoken callouts and a few surprises. On by default, never changes gameplay, and Mute silences it
 - **Palettes**: Original, GBC LCD, Swamp, Guideline, Sega, Amber Night
 - Scanlines and Mute
 

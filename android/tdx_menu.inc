@@ -57,11 +57,20 @@ static void tdx_card(const char* title, const char* value, int index, int count)
  * 8 Korobeiniki, 9 SRS, 10 Randomizer, 11 Hold; read only: 12 held piece
  * (-1 none), 13 queue length, 14-18 queue, 19 in play, 20-26 piece colours,
  * 27 SRS on, 28 hold used this piece; 29 preview layout (0 off, 1-4);
- * 30 Lock Delay; 31 the game's next piece ($AF84). */
+ * 30 Lock Delay; 31 the game's next piece ($AF84); 32 Announcer; 33 Tetris event counter;
+ * 34 its kind (1 Tetris, 2 back-to-back, 3 perfect clear, 4 level 30, 5-7 T-Spin Single/Double/Triple, 8 T-Spin without a clear, 9-16 see tdx_platform.inc). */
 extern "C" JNIEXPORT jint JNICALL
 Java_org_tetrisdx_recomp_TouchControls_nativeGet(JNIEnv* env, jclass cls, jint id) {
     (void)env; (void)cls;
     switch (id) {
+        case 47: {   /* one number that changes when anything the Hold / Next boxes show changes */
+#define TDX_G(n) Java_org_tetrisdx_recomp_TouchControls_nativeGet(env, cls, (n))
+            jint sig = TDX_G(19) * 31 + TDX_G(11) * 7 + (TDX_G(12) + 2) * 131 + TDX_G(28) * 5 + TDX_G(13) * 17
+                     + TDX_G(4) * 1009 + TDX_G(27) * 3 + TDX_G(29) * 7919 + (TDX_G(31) + 2) * 389;
+            for (int i = 0; i < 3; i++) sig = sig * 37 + (TDX_G(14 + i) + 2);
+#undef TDX_G
+            return sig;
+        }
         case 0: return g_tdx_harddrop ? 1 : 0;
         case 1: return g_tdx_ghost;
         case 2: return g_tdx_dontpanic ? 1 : 0;
@@ -86,16 +95,25 @@ Java_org_tetrisdx_recomp_TouchControls_nativeGet(JNIEnv* env, jclass cls, jint i
         case 29: return g_tdx_preview;
         case 30: return g_tdx_lockdelay ? 1 : 0;
         case 31: return (g_registered_ctx && g_registered_ctx->eram) ? g_registered_ctx->eram[0xF84] : -1;
-        default: return 0;
+        case 32: return g_tdx_voice ? 1 : 0;
+        case 33: return g_tdx_tetris_event.load(std::memory_order_relaxed);
+        case 34: return g_tdx_tetris_kind.load(std::memory_order_relaxed);
+        case 46: return g_tdx_milestone.load(std::memory_order_relaxed);
+        default:
+            return 0;
     }
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_org_tetrisdx_recomp_TouchControls_nativeSet(JNIEnv* env, jclass cls, jint id, jint v) {
     (void)env; (void)cls;
+    if (id == 45) {   /* game volume while a voice clip plays (not saved) */
+        g_audio_volume_percent.store((uint32_t)(v < 0 ? 0 : v > 100 ? 100 : v), std::memory_order_relaxed);
+        return;
+    }
     switch (id) {
         case 0: g_tdx_harddrop = v != 0; break;
-        case 1: g_tdx_ghost = (v >= 0 && v <= 2) ? (int)v : 0; break;
+        case 1: g_tdx_ghost = (v >= 0 && v <= 4) ? (int)v : 0; if (g_tdx_ghost == 1) g_tdx_ghost = 2; break;   /* 1 (white outline) was removed */
         case 2: g_tdx_dontpanic = v != 0; break;
         case 3: g_tdx_skipceleb = (v >= 0 && v <= 2) ? (int)v : 0; break;
         case 4: g_tdx_palette = (v >= 0 && v < TDX_PAL_COUNT && v != TDX_PAL_PASTEL && v != TDX_PAL_SUNSET && v != TDX_PAL_GRAPHITE) ? (int)v : TDX_PAL_GBC_LCD; break;
@@ -107,6 +125,7 @@ Java_org_tetrisdx_recomp_TouchControls_nativeSet(JNIEnv* env, jclass cls, jint i
         case 11: g_tdx_hold = v != 0; break;
         case 29: g_tdx_preview = (v >= 0 && v <= 5) ? (int)v : 4; break;
         case 30: g_tdx_lockdelay = v != 0; break;
+        case 32: g_tdx_voice = v != 0; break;
         default: return;
     }
     g_tdx_req.fetch_or(TDX_REQ_SAVE);

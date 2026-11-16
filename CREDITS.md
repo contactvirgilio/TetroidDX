@@ -51,5 +51,8 @@ above. The `.asm` files re-create their changes as switchable routines.
 - BPreplay font by George Triantafyllakos, SIL Open Font License 1.1
   (`licenses/BPreplayBold-OFL.txt`).
 
+- Announcer voice clips: British female text-to-speech from luvvoice.com, made
+  robotic here.
+
 Android app, menu and touch controls built with **Claude** (Anthropic)
 together with the project owner. These credits also appear in the app.
